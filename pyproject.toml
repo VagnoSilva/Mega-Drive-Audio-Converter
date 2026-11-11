@@ -1,0 +1,20 @@
+[project]
+name = "mdconv"
+version = "0.1.0"
+description = "Conversor de músicas de GBA (MIDI + SF2) para Mega Drive (YM2612/SN76489, VGM/XGM)"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+gui = ["PySide6>=6.5"]
+
+[project.scripts]
+mdconv = "mdconv.cli:main"
+
+[project.gui-scripts]
+mdconv-gui = "mdconv.gui.main_window:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: testes demorados (otimizador)"]

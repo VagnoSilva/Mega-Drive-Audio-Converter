@@ -102,9 +102,9 @@ class _W:
 @dataclass
 class FurInstrument:
     name: str
-    kind: str                           # 'fm' | 'psg' | 'kit'
+    kind: str                           # 'fm' | 'psg' | 'kit' | 'noise'
     patch: Patch | None = None
-    vol_macro: list[int] | None = None  # PSG: 0–15 por tick
+    vol_macro: list[int] | None = None  # PSG: 0–15 por tick (ADSR); ruído: sequência por quadro
     vol_rel: int = 255
     note_map: dict[int, int] | None = None   # kit: tecla MIDI → índice da amostra
 
@@ -215,6 +215,8 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
             return idx
         if kind == "psg":
             return psg0 + idx
+        if kind == "noise":
+            return psg0 + 3
         raise ValueError(kind)
 
     # ---- intervalo de tempo exportado (sem a introdução vazia do ripper)
@@ -286,6 +288,23 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
             vals, rel = _psg_macro(env)
             ins_index[key] = len(instruments)
             instruments.append(FurInstrument(f"PSG {label_of(bp)}", "psg", vol_macro=vals, vol_rel=rel))
+        return ins_index[key]
+
+    noise_pieces = {}                    # instrumento → atenuação mínima (pico) da peça
+
+    def noise_ins(n):
+        """Peça de ruído: macro de volume = envelope relativo ao pico (quadro a quadro, como no
+        driver) e macro de "duty" = 1 (ruído branco, taxa fixa)."""
+        k = (n.bank, n.program, n.key)
+        key = ("noise", k)
+        if key not in ins_index:
+            pc = conv.kit.noise[k]
+            a0 = float(np.min(pc.att_db))
+            mac = [max(0, min(15, 15 - int(round((a - a0) / PSG_STEP_DB)))) for a in pc.att_db][:254]
+            mac.append(0)                                    # fim da peça: silêncio
+            ins_index[key] = len(instruments)
+            instruments.append(FurInstrument(f"Ruído {pc.name}", "noise", vol_macro=mac))
+            noise_pieces[ins_index[key]] = (a0, pc.vel_ref)
         return ins_index[key]
 
     # ---- amostras e kits (PCM)
@@ -372,6 +391,11 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
             # convenção do Furnace (herdada do DefleMask): no SN76489 a nota escrita soa
             # 2 oitavas acima — o "A-4" do PSG toca 1760 Hz. Medido no Furnace 0.6.8.3.
             key = n.key - PSG_NOTE_SHIFT
+        elif typ == "noise":
+            ins = noise_ins(n)
+            # no modo de taxa fixa o Furnace escolhe a taxa pela nota: C = N/2048, C# = N/1024,
+            # D = N/512 (o ruído do driver)
+            key = 62
         else:
             ins = kit_ins(bp)
             key = n.key
@@ -387,6 +411,13 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
             c.ins = ins                    # explícito: facilita editar/copiar trechos
         rep.notes += 1
         rec["row"] = row
+        if typ == "noise":
+            # volume da nota (coluna) = pico da peça + velocity, como no driver; o envelope
+            # está no macro e termina em silêncio — sem OFF
+            a0, vref = noise_pieces[ins]
+            att = a0 + 20 * math.log10(vref / max(1, n.velocity))
+            c.vol = max(0, min(15, 15 - int(round(att / PSG_STEP_DB))))
+            continue
         # fim
         if typ == "pcm":
             continue
@@ -417,7 +448,8 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     for k in ev_ticks:
         ev_ticks[k] = sorted(set(ev_ticks[k]))
     state = [{"pitch": 0x80, "vib": None, "range": None, "pan": None} for _ in range(n_ch)]
-    for rec in sorted((r for r in events if "row" in r and r["typ"] != "pcm"), key=lambda r: r["row"]):
+    for rec in sorted((r for r in events if "row" in r and r["typ"] not in ("pcm", "noise")),
+                      key=lambda r: r["row"]):
         ch, n, typ = rec["ch"], rec["n"], rec["typ"]
         row0 = rec["row"]
         row1 = rec.get("erow", row0 + 1)
@@ -614,7 +646,7 @@ def _psg_macro(env: dict) -> tuple[list[int], int]:
 def _ins_block(w: _W, ins: FurInstrument):
     p = w.block(b"INS2")
     w.s(FUR_VERSION)
-    typ = {"fm": 1, "psg": 0, "kit": 4}[ins.kind]
+    typ = {"fm": 1, "psg": 0, "noise": 0, "kit": 4}[ins.kind]
     w.s(typ)
 
     def feature(code: bytes, body):
@@ -661,6 +693,23 @@ def _ins_block(w: _W, ins: FurInstrument):
                 w.c(x)
             w.c(0xFF)
         feature(b"MA", ma)
+    elif ins.kind == "noise":
+        def ma_noise():
+            w.s(8)
+            v = ins.vol_macro
+            for code, data in ((0, v), (2, [1])):       # volume; duty = modo de ruído (1 = branco)
+                w.c(code)
+                w.c(len(data))
+                w.c(255)                    # sem loop
+                w.c(255)                    # sem release
+                w.c(0)                      # modo
+                w.c(0)                      # sequência; 8 bits sem sinal
+                w.c(0)                      # atraso
+                w.c(1)                      # velocidade
+                for x in data:
+                    w.c(x)
+            w.c(0xFF)
+        feature(b"MA", ma_noise)
     else:
         def sm():
             nm = ins.note_map or {}

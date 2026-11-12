@@ -132,16 +132,20 @@ def write_xgm(stream: Stream, path, pal: bool = False) -> XgmInfo:
     music = bytearray()
     filtered = 0
     loop_ofs = None
+    last = len(frames) - 1
     for f, ws in enumerate(frames):
         if f == loop_frame:
             loop_ofs = len(music)
         filtered += _encode_frame(ws, music)
+        if f == last and loop_ofs is not None:
+            # O driver Z80 (drv_xgm.s80, com_loop) salta para o loop e encerra o quadro
+            # corrente. Por isso o $7E vai DENTRO do último quadro, antes do $00 (como faz o
+            # xgmtool). Num quadro próprio ele custaria 1 quadro mudo a cada volta do loop.
+            if loop_ofs > 0xFFFFFF:
+                raise XgmError("offset de loop não cabe em 24 bits")
+            music += b"\x7E" + struct.pack("<I", loop_ofs)[:3]
         music.append(0x00)
-    if loop_ofs is not None:
-        if loop_ofs > 0xFFFFFF:
-            raise XgmError("offset de loop não cabe em 24 bits")
-        music += b"\x7E" + struct.pack("<I", loop_ofs)[:3]
-    else:
+    if loop_ofs is None:
         music.append(0x7F)
 
     data = (b"XGM " + bytes(table) + struct.pack("<HBB", len(sdata) // ALIGN, 1, 1 if pal else 0)
@@ -170,7 +174,8 @@ def read_xgm(data: bytes) -> XgmFile:
     samples = {}
     for i in range(MAX_SAMPLES):
         a, n = struct.unpack_from("<HH", data, 4 + 4 * i)
-        if (a, n) == (0xFFFF, 0x0001):
+        if a == 0xFFFF or n == 0:
+            # entrada vazia: nós gravamos FFFF/0001 (doc do SGDK); o xgmtool grava FFFF/0000
             continue
         if (a + n) * ALIGN > slen:
             raise XgmError(f"amostra {i + 1} fora do bloco de amostras")
@@ -184,6 +189,7 @@ def read_xgm(data: bytes) -> XgmFile:
     frame_at: dict[int, int] = {}
     pos = 0
     loop_frame = None
+    in_frame_loop = False
     while True:
         if pos >= len(music):
             raise XgmError("bloco de música sem $7E/$7F")
@@ -214,11 +220,14 @@ def read_xgm(data: bytes) -> XgmFile:
             if ofs not in frame_at:
                 raise XgmError(f"loop aponta para {ofs}, que não é início de comando")
             loop_frame = frame_at[ofs]
+            in_frame_loop = music[pos + 4:pos + 5] == b"\x00"
             break
         elif c == 0x7F:
             break
         else:
             raise XgmError(f"comando ${c:02X} desconhecido em {pos}")
-    if frames and not frames[-1]:
+    # $7E dentro do último quadro (seguido de $00): o quadro vale mesmo vazio.
+    # $7E/$7F em quadro próprio (formato antigo): descarta o quadro vazio final.
+    if frames and not frames[-1] and not in_frame_loop:
         frames.pop()
     return XgmFile(bool(flags & 1), ver, samples, frames, loop_frame)

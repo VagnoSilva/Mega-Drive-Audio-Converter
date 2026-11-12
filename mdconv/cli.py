@@ -135,7 +135,8 @@ def _convert(args):
     return song, convert(song, sf, Path(args.library), use_pcm=not args.no_pcm, pcm_channels=pcm,
                          vibrato=not args.no_vibrato,
                          balance="manual" if args.fm_att is not None else "auto",
-                         fm_att_db=args.fm_att or 0.0)
+                         fm_att_db=args.fm_att or 0.0, noise_metals=args.noise_metals,
+                         fm_alloc=args.fm_alloc, snap_tempo=args.tempo_grid)
 
 
 def cmd_import_tfi(args) -> int:
@@ -244,6 +245,12 @@ def main(argv=None) -> int:
                     help="canais PCM do XGM para a música (os outros ficam para o jogo)")
     pv.add_argument("--no-pcm", action="store_true", help="sem PCM (FM6 livre; bateria no PSG)")
     pv.add_argument("--no-vibrato", action="store_true")
+    pv.add_argument("--fm-alloc", choices=["auto", "dinamico", "fixo"], default="auto",
+                    help="canais FM: fixo por parte (como no tracker), nota a nota, ou o melhor dos dois")
+    pv.add_argument("--tempo-grid", action="store_true",
+                    help="trava o andamento na grade de quadros (passo rítmico com nº inteiro de quadros)")
+    pv.add_argument("--noise-metals", action="store_true",
+                    help="chimbais, pratos e afins no ruído do PSG (libera o PCM para bumbo e caixa)")
     pv.add_argument("--fm-att", type=float, help="atenuação FM/PSG manual em dB (padrão: automática)")
     pv.add_argument("--engine", choices=["auto", "nuked", "proprio", "gpgx"], default="auto",
                     help="emulador do FM na prévia (auto = Nuked-OPN2)")
@@ -269,6 +276,12 @@ def main(argv=None) -> int:
                     help="canais PCM do XGM para a música (os outros ficam para o jogo)")
     ex.add_argument("--no-pcm", action="store_true", help="sem PCM (FM6 livre; bateria no PSG)")
     ex.add_argument("--no-vibrato", action="store_true")
+    ex.add_argument("--fm-alloc", choices=["auto", "dinamico", "fixo"], default="auto",
+                    help="canais FM: fixo por parte (como no tracker), nota a nota, ou o melhor dos dois")
+    ex.add_argument("--tempo-grid", action="store_true",
+                    help="trava o andamento na grade de quadros (passo rítmico com nº inteiro de quadros)")
+    ex.add_argument("--noise-metals", action="store_true",
+                    help="chimbais, pratos e afins no ruído do PSG (libera o PCM para bumbo e caixa)")
     ex.add_argument("--fm-att", type=float, help="atenuação FM/PSG manual em dB (padrão: automática)")
     ex.set_defaults(func=cmd_export)
 

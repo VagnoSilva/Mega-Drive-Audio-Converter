@@ -6,8 +6,7 @@
 * PSG: emulador próprio (o GPGX fornecido não inclui um PSG distribuível).
 * PCM: mixer que imita o do XGM v1 — até 4 canais de 8 bits com sinal a ≈14 kHz, somados e
   limitados a 8 bits, saindo pelo DAC (canal FM6) com retenção de amostra até a próxima.
-  **Aproximação**: a forma exata de soma/saturação do driver Z80 do XGM será conferida na
-  Fase 6b, no hardware.
+  A soma com saturação em 8 bits foi conferida no driver Z80 (drv_xgm.s80: estouro vira $7F/$80).
 """
 from __future__ import annotations
 
@@ -47,7 +46,8 @@ def _fm_chip(engine: str = "auto"):
 
 def render_stream(stream: Stream, sr_out: int = 44100, normalize: bool = True,
                   solo: set[str] | None = None, fm_engine: str = "auto") -> tuple[np.ndarray, RenderInfo]:
-    """``solo``: subconjunto de {'fm', 'psg', 'pcm'} para ouvir partes isoladas.
+    """``solo``: subconjunto de {'fm', 'psg', 'noise', 'pcm'} para ouvir partes isoladas
+    ('psg' = os 3 canais de tom; 'noise' = o canal de ruído).
     ``fm_engine``: auto | proprio | nuked | gpgx."""
     gp, engine = _fm_chip(fm_engine)
     if gp is not None:
@@ -62,15 +62,19 @@ def render_stream(stream: Stream, sr_out: int = 44100, normalize: bool = True,
     out = []
     acc = 0.0
     clipped = 0
-    use = solo or {"fm", "psg", "pcm"}
+    use = solo or {"fm", "psg", "noise", "pcm"}
+    latch = 0                                            # canal do PSG travado no último byte de comando
     for writes in stream.frames:
         for w in writes:
             if w[0] == "fm":
                 if "fm" in use or w[2] in (0x2A, 0x2B):
                     fm.write_fm(w[1], w[2], w[3])
             elif w[0] == "psg":
-                if "psg" in use:
-                    psg.write_psg(w[1])
+                b = w[1]
+                if b & 0x80:
+                    latch = (b >> 5) & 3
+                if ("noise" if latch == 3 else "psg") in use:
+                    psg.write_psg(b)
             elif w[0] == "pcm":
                 playing[w[1]] = [w[2], 0.0]
         acc += spf

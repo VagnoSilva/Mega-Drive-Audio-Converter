@@ -73,8 +73,11 @@ def test_xgm_loop_offset_points_to_loop_frame(tmp_path):
     p = tmp_path / "c.xgm"
     write_xgm(s, p)
     data = p.read_bytes()
-    assert data[-4] == 0x7E
-    assert read_xgm(data).loop_frame == 37
+    # como no xgmtool: ... comandos do último quadro, $7E + offset, $00 (sem quadro mudo extra)
+    assert data[-5] == 0x7E and data[-1] == 0x00
+    x = read_xgm(data)
+    assert x.loop_frame == 37
+    assert len(x.frames) == 90                             # nenhum quadro extra no loop
 
 
 def test_xgm_rejects_invalid(tmp_path):
@@ -142,3 +145,16 @@ def test_export_and_validate(tmp_path):
     assert (tmp_path / "m.xgm").exists() and (tmp_path / "m.vgm").exists()
     assert any("idêntico quadro a quadro" in l for l in lines)
     assert any("SOUND_PCM_CH1" in l for l in lines)
+
+
+def test_xgm_reader_accepts_xgmtool_empty_entries(tmp_path):
+    # o xgmtool do SGDK marca entradas vazias como FFFF/0000 (nós usamos FFFF/0001)
+    s = make_stream(pcm=True)
+    p = tmp_path / "f.xgm"
+    write_xgm(s, p)
+    data = bytearray(p.read_bytes())
+    for i in range(63):
+        if data[4 + 4 * i:8 + 4 * i] == b"\xff\xff\x01\x00":
+            data[6 + 4 * i] = 0
+    x = read_xgm(bytes(data))
+    assert set(x.samples) == set(s.pcm_samples)

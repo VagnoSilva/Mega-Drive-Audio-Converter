@@ -48,6 +48,9 @@ class ProjectSettings:
     use_pcm: bool = True
     pcm_channels: list[int] = field(default_factory=lambda: [1, 2])
     vibrato: bool = True
+    noise_metals: bool = False         # chimbais/pratos no ruído do PSG (libera o PCM)
+    fm_alloc: str = "auto"             # canais FM: auto | dinamico (nota a nota) | fixo (por parte)
+    snap_tempo: bool = False           # andamento travado na grade de quadros (60 Hz)
     fm_att_db: float | None = None     # None = equilíbrio automático
     loop_mode: str = "auto"            # auto | markers | none
     loop_start_tick: int | None = None # escolhido pelo usuário (sobrepõe a detecção)
@@ -90,6 +93,8 @@ class ProjectSettings:
             errs.append("canais PCM vão de 1 a 4")
         if self.loop_mode not in ("auto", "markers", "none"):
             errs.append("modo de loop inválido")
+        if self.fm_alloc not in ("auto", "dinamico", "fixo"):
+            errs.append(f"modo de canais FM desconhecido: {self.fm_alloc}")
         if self.fm_engine not in ("auto", "proprio", "nuked", "gpgx"):
             errs.append(f"motor de prévia desconhecido: {self.fm_engine}")
         bad = set(self.formats) - {"xgm", "vgm", "fur"}
@@ -120,6 +125,16 @@ class InstrumentRow:
     status: str                    # aprovado | provisório | bateria (PCM) | sem patch (PSG)
     library_id: str | None = None
     candidates: list[Candidate] = field(default_factory=list)
+    chip_use: dict[str, int] = field(default_factory=dict)   # canal do chip → nº de notas (última conversão)
+
+    def chip_text(self) -> str:
+        """Ex.: "FM1 70% · FM4 30%". Vazio se ainda não houve conversão."""
+        tot = sum(self.chip_use.values())
+        if not tot:
+            return ""
+        order = sorted(self.chip_use.items(), key=lambda kv: (-kv[1], kv[0]))
+        txt = " · ".join(f"{k} {round(100 * v / tot)}%" if len(order) > 1 else k for k, v in order[:4])
+        return txt + (f" · +{len(order) - 4}" if len(order) > 4 else "")
 
     @property
     def key(self) -> tuple[int, int]:
@@ -263,7 +278,31 @@ class Project:
             else:
                 r.status = "PSG"
             r.candidates = self._candidates_from(fits, r.key)
+        for bp, use in self._chip_use().items():
+            if bp in rows:
+                rows[bp].chip_use = use
         return sorted(rows.values(), key=lambda r: (min(r.channels), r.bank, r.program))
+
+    def _chip_use(self) -> dict:
+        """Canais do chip em que o driver tocou cada instrumento, na última conversão (que
+        ainda vale para as configurações atuais). O driver escolhe o canal nota a nota."""
+        c = self._conversion
+        # o patch aprovado não muda a escolha de canais: ignora a biblioteca na comparação
+        if c is None or c.driver is None or self._conv_key is None or self._conv_key[:-1] != self._key()[:-1]:
+            return {}
+        use: dict[tuple[int, int], dict[str, int]] = {}
+        for ev in c.driver.timeline:
+            if ev[0] == "on":
+                _, _, typ, idx, n = ev
+                name = {"fm": f"FM{idx + 1}", "psg": f"PSG{idx + 1}", "noise": "Ruído"}[typ]
+            elif ev[0] == "pcm":
+                _, _, ch, n, _ = ev
+                name = f"PCM{ch}"
+            else:
+                continue
+            d = use.setdefault((n.bank, n.program), {})
+            d[name] = d.get(name, 0) + 1
+        return use
 
     def _fit_report(self) -> dict:
         path = self.fit_dir / "patches.json"
@@ -333,7 +372,8 @@ class Project:
     # ---------------------------------------------------------------- conversão
     def _key(self):
         s = self.settings
-        return (tuple(s.pcm_channels), s.use_pcm, s.vibrato, s.fm_att_db, s.loop_mode,
+        return (tuple(s.pcm_channels), s.use_pcm, s.vibrato, s.noise_metals, s.fm_alloc, s.snap_tempo,
+                s.fm_att_db, s.loop_mode,
                 s.loop_start_tick, s.loop_end_tick, self._library_stamp())
 
     def _library_stamp(self):
@@ -354,7 +394,8 @@ class Project:
                     pcm_channels=s.pcm_channels if s.use_pcm else [], vibrato=s.vibrato,
                     balance="manual" if s.fm_att_db is not None else "auto",
                     fm_att_db=s.fm_att_db or 0.0, loop_mode=s.loop_mode,
-                    loop_start_tick=s.loop_start_tick, loop_end_tick=s.loop_end_tick)
+                    loop_start_tick=s.loop_start_tick, loop_end_tick=s.loop_end_tick,
+                    noise_metals=s.noise_metals, fm_alloc=s.fm_alloc, snap_tempo=s.snap_tempo)
         self.plan = c.plan
         self._conversion, self._conv_key = c, key
         return c

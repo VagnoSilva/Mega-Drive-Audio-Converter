@@ -190,7 +190,7 @@ def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
         if p.kind.startswith("kit"):
             p.role, p.priority = "bateria", 80
             p.pool = "PCM" if use_pcm and pcm_channels else "PSG"
-            p.reasons.append("kit de bateria → PCM" if p.pool == "PCM" else "kit → ruído do PSG (PCM desligado)")
+            p.reasons.append("kit de bateria → PCM" if p.pool == "PCM" else "kit → PSG (PCM desligado)")
         elif p.key in echoes:
             e = echoes[p.key]
             p.echo = e

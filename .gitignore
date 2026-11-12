@@ -1,6 +1,13 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-mdconv/chips/native/*.so
-mdconv/chips/native/*.dll
+.ruff_cache/
 reports/
+# saídas do PyInstaller: o executável vai nos Releases do GitHub, não no código
+build/
+dist/
+*.spec
+# biblioteca Linux gerada na hora; as DLLs do Windows (mdchips.dll e nuked_opn2.dll)
+# fazem parte do projeto e DEVEM ir para o repositório
+mdconv/chips/native/*.so
+mdconv/chips/native/nuked_opn2/*.so

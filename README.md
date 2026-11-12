@@ -230,3 +230,53 @@ Furnace 0.6.8.3 com a MESMA distribuição do XGM: cada nota no canal em que o d
 Conferido no próprio Furnace 0.6.8.3 (compilado em linha de comando): o arquivo abre,
 toca com a duração, o loop e o equilíbrio FM/PSG/PCM da prévia, e as alturas batem.
 Os testes `tests/unit/test_furnace.py` usam o Furnace se `MDCONV_FURNACE` apontar para ele.
+
+## Canais FM fixos e andamento na grade de 60 Hz
+
+Na aba de arranjo:
+
+* **Canais FM** — *Fixos por parte*: como um músico faria no tracker, melodia, baixo e as partes
+  que mais tocam ganham canal FM próprio (o patch não é recarregado e o release de uma nota
+  termina sob a seguinte); as vozes que não cabem vão para o PSG e ecos/partes curtas dividem
+  um canal. *Nota a nota*: o comportamento anterior (qualquer canal livre). *Automático*
+  (padrão): converte dos dois jeitos e fica com o que perde menos notas e recarrega menos
+  patches — o relatório mostra a comparação. Na song003: cargas de patch 221 → 143, notas
+  encurtadas 24 → 7, omitidas 17 → 10. Na song001, mais densa, o automático mantém o nota a nota.
+* **Travar o andamento na grade de 60 Hz** — ajusta o andamento (até 6%) para o passo rítmico
+  durar um número inteiro de quadros: na song003, 102 → 100 BPM e a semicolcheia em 6 quadros
+  exatos em vez de alternar 6 e 5 (o mesmo andamento que o músico usou na versão de tracker).
+* Em qualquer modo, escritas FM que repetem o valor que o registrador já tem são omitidas
+  (como o Furnace faz): na song003, 4.279 escritas a menos e música 35% menor no XGM, sem
+  mudança no som.
+
+## Chimbais e pratos no ruído do PSG (opcional)
+
+Na aba de arranjo, "Chimbais e pratos no ruído do PSG" (na linha de comando, `--noise-metals`)
+manda as peças metálicas do kit para o canal de ruído do PSG em vez do PCM:
+
+* **Quais peças:** decididas pelo som, não pela tecla (os kits do GBA não seguem o mapa GM):
+  agudas (centroide ≥ 3,5 kHz, boa parte da energia acima de 5 kHz) e sem corpo grave. Bumbo,
+  caixa e tons ficam no PCM. O relatório lista as peças escolhidas.
+* **Como soam:** ruído branco N/512, com o envelope de volume da própria amostra quadro a
+  quadro (passos de 2 dB) e o volume de cada nota (velocity) — coisa que o PCM do XGM não
+  tem. Um golpe novo corta o anterior; no mesmo quadro vence a peça mais forte.
+* **Ganho:** menos golpes de PCM disputando os canais da música (na song001, as caudas
+  cortadas caíram de 239 para 14) e menos ROM gasta com amostras (65,5 → 30,5 KB).
+* **Exportação:** XGM, VGM e Furnace (canal "Ruído", com macros de volume e de modo de ruído).
+* **Referência:** jogos comerciais fazem o mesmo (ex.: Eternal Champions, ruído branco N/1024
+  com decaimento de 2 dB por quadro).
+
+## Publicar o executável no GitHub
+
+1. Gere com `packaging\build_windows.bat` (ou `... onefile`). No fim ele cria
+   `dist\MegaDriveAudioConverter-windows-x64.zip`.
+2. No GitHub: **Releases → Draft a new release**, escolha uma tag (ex.: `v0.1`) e
+   arraste esse **.zip** para "Attach binaries". Publique.
+3. Quem baixar: extrai o zip e roda `MegaDriveAudioConverter.exe` **de dentro da pasta
+   extraída** (ao lado da pasta `_internal`).
+
+Não publique só o `.exe` da pasta `dist\MegaDriveAudioConverter`: ele depende da pasta
+`_internal` (Python, Qt, emuladores) e, sozinho, pede `python3xx.dll`. Também não vale
+mandar o executável pelo próprio repositório (git) — use os Releases.
+
+Requisitos de quem usa: Windows 10 ou 11, 64 bits (o Python 3.14 não roda em Windows 7/8).

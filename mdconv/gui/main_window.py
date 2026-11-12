@@ -82,7 +82,7 @@ def _path_row(edit: QLineEdit, button: QPushButton) -> QWidget:
 
 # ------------------------------------------------------------------ janela
 class MainWindow(QMainWindow):
-    COLS = ["Instrumento", "Canais", "Notas", "Função", "Destino", "Patch FM"]
+    COLS = ["Instrumento", "Canais", "Notas", "Função", "Destino", "Canal no chip", "Patch FM"]
 
     def __init__(self):
         super().__init__()
@@ -257,6 +257,27 @@ class MainWindow(QMainWindow):
         h.addWidget(QLabel("  (os canais não marcados ficam livres para os efeitos do jogo)"))
         h.addStretch(1)
         self.ck_vibrato = QCheckBox("Vibrato (modulação do m4a)")
+        self.cb_alloc = QComboBox()
+        for label, data in (("Automático (o melhor dos dois)", "auto"),
+                            ("Fixos por parte (como no tracker)", "fixo"),
+                            ("Nota a nota (dinâmico)", "dinamico")):
+            self.cb_alloc.addItem(label, data)
+        self.cb_alloc.setToolTip(
+            "Fixos: as partes principais ganham canal FM próprio (sem recarregar patch, o release\n"
+            "termina sob a nota seguinte); vozes a mais vão para o PSG.\n"
+            "Nota a nota: qualquer canal livre, a cada nota (perde menos notas em músicas densas).\n"
+            "Automático: converte dos dois jeitos e fica com o que perde menos notas e recarrega\n"
+            "menos patches (o relatório mostra a comparação).")
+        self.ck_grid = QCheckBox("Travar o andamento na grade de 60 Hz (ritmo sem oscilação; muda o andamento em até 6%)")
+        self.ck_grid.setToolTip(
+            "Ajusta o andamento para o passo rítmico durar um número inteiro de quadros, como um\n"
+            "músico faria no tracker. Ex.: 102 → 100 BPM deixa a semicolcheia em 6 quadros exatos\n"
+            "em vez de alternar 6 e 5.")
+        self.ck_noise = QCheckBox("Chimbais e pratos no ruído do PSG (libera o PCM para bumbo e caixa)")
+        self.ck_noise.setToolTip(
+            "Peças metálicas do kit (detectadas pelo som: agudas e sem grave) tocam no canal de\n"
+            "ruído do PSG, com o envelope da própria amostra e o volume de cada nota.\n"
+            "Os canais PCM ficam para bumbo, caixa e tons, e a ROM gasta menos com amostras.")
         bal = QWidget()
         hb = QHBoxLayout(bal)
         hb.setContentsMargins(0, 0, 0, 0)
@@ -272,6 +293,9 @@ class MainWindow(QMainWindow):
         hb.addStretch(1)
         fl.addRow(self.ck_pcm)
         fl.addRow("Canais PCM da música:", pcm_row)
+        fl.addRow("Canais FM:", self.cb_alloc)
+        fl.addRow(self.ck_grid)
+        fl.addRow(self.ck_noise)
         fl.addRow(self.ck_vibrato)
         fl.addRow("Equilíbrio bateria × resto:", bal)
         self.bt_replan = QPushButton("Aplicar e refazer o arranjo")
@@ -414,6 +438,9 @@ class MainWindow(QMainWindow):
         for c, ck in enumerate(self.ck_pcm_ch, 1):
             ck.setChecked(c in s.pcm_channels)
         self.ck_vibrato.setChecked(s.vibrato)
+        self.ck_noise.setChecked(s.noise_metals)
+        self.cb_alloc.setCurrentIndex(max(0, self.cb_alloc.findData(s.fm_alloc)))
+        self.ck_grid.setChecked(s.snap_tempo)
         self.ck_auto_bal.setChecked(s.fm_att_db is None)
         self.sp_att.setValue(s.fm_att_db or 0.0)
         self.sp_att.setEnabled(s.fm_att_db is not None)
@@ -437,6 +464,9 @@ class MainWindow(QMainWindow):
         s.use_pcm = self.ck_pcm.isChecked()
         s.pcm_channels = [c for c, ck in enumerate(self.ck_pcm_ch, 1) if ck.isChecked()]
         s.vibrato = self.ck_vibrato.isChecked()
+        s.noise_metals = self.ck_noise.isChecked()
+        s.fm_alloc = self.cb_alloc.currentData()
+        s.snap_tempo = self.ck_grid.isChecked()
         s.fm_att_db = None if self.ck_auto_bal.isChecked() else float(self.sp_att.value())
         s.loop_mode = self.cb_loop.currentData()
         s.formats = [f for f, ck in (("xgm", self.ck_xgm), ("vgm", self.ck_vgm), ("fur", self.ck_fur))
@@ -611,13 +641,16 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             vals = [r.label, ", ".join(f"C{c}" for c in r.channels), str(r.notes), ", ".join(r.roles),
-                    " + ".join(r.pools), r.status + (f" ({len(r.candidates)} cand.)"
-                                                    if r.candidates and r.status != "aprovado" else "")]
+                    " + ".join(r.pools), r.chip_text() or "—",
+                    r.status + (f" ({len(r.candidates)} cand.)"
+                                if r.candidates and r.status != "aprovado" else "")]
             for j, val in enumerate(vals):
                 it = QTableWidgetItem(val)
-                if j == 5 and r.status == "provisório":
+                if j == 5:
+                    it.setToolTip(self._chip_tooltip(r))
+                if j == 6 and r.status == "provisório":
                     it.setForeground(Qt.darkYellow)
-                elif j == 5 and r.status == "aprovado":
+                elif j == 6 and r.status == "aprovado":
                     it.setForeground(Qt.darkGreen)
                 self.table.setItem(i, j, it)
         target = next((i for i, r in enumerate(rows) if r.key == key), 0 if rows else -1)
@@ -626,6 +659,15 @@ class MainWindow(QMainWindow):
             self.table.selectRow(target)
         self.table.blockSignals(False)
         self._instrument_selected()
+
+    @staticmethod
+    def _chip_tooltip(r) -> str:
+        if not r.chip_use:
+            return ("Aparece depois de converter (aba Arranjo → \"Aplicar e refazer o arranjo\" ou prévia).\n"
+                    "Informativo: o driver escolhe o canal nota a nota.")
+        lines = [f"{k}: {v} nota(s)" for k, v in sorted(r.chip_use.items(), key=lambda kv: -kv[1])]
+        return ("Canais do chip usados na última conversão (o driver escolhe nota a nota):\n"
+                + "\n".join(lines))
 
     def _selected_row(self):
         # Pela SELEÇÃO, não por currentRow(): ao clicar, o Qt avisa a mudança de seleção
@@ -643,6 +685,8 @@ class MainWindow(QMainWindow):
             self.lb_inst.setText("Selecione um instrumento.")
             return
         info = f"{r.label} — canais {', '.join(map(str, r.channels))} — {r.status}"
+        if r.chip_use:
+            info += f"\nNo chip: {r.chip_text()}"
         if not r.needs_fm:
             info += ("\nEste instrumento não toca no FM (" + " + ".join(r.pools) +
                      "), não precisa de patch.")

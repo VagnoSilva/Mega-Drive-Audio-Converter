@@ -12,6 +12,13 @@ Alocação nota a nota:
    a nota PSG de menor prioridade.
 3. Sem lugar: a nota é omitida. Tudo isso entra no relatório de alterações.
 
+Modo de canais fixos (``fm_alloc="fixo"``), como um músico faria no tracker: as partes FM
+mais importantes ganham canal(is) próprio(s) — a quantidade segue a polifonia da parte — e
+as outras dividem o que sobra. Uma parte toca sempre no seu canal (o patch não é recarregado
+e o release de uma nota termina sob a seguinte); se precisar de mais vozes, usa um canal
+livre de outra parte (o mais antigo em silêncio, para não cortar caudas), e só então rouba.
+Em qualquer modo, entre os canais livres vale o que ficou em silêncio há mais tempo.
+
 Parâmetros musicais:
 * Volume: lei linear do m4a (amplitude = velocity/127 × volume/127), aplicada como
   atenuação no TL das portadoras (0,75 dB por passo) e no volume do PSG (2 dB por passo).
@@ -21,6 +28,10 @@ Parâmetros musicais:
 * PSG: envelope de volume por software, a partir do envelope do instrumento no SF2.
 * PCM: uma amostra por peça do kit (ver ``mdconv.pcm.kit``); sem controle de volume no
   XGM, então a velocity das notas de bateria não muda o volume (registrado).
+* Ruído do PSG (opcional): peças metálicas do kit (chimbal, prato…) tocam no canal de ruído,
+  com o envelope de volume da própria amostra, quadro a quadro, e a velocity da nota. Um golpe
+  novo corta o anterior (como o chimbal fechado corta o aberto); no mesmo quadro, vence a
+  peça mais forte.
 """
 from __future__ import annotations
 
@@ -68,6 +79,7 @@ class _Voice:
     last_vol: int | None = None
     env: dict | None = None    # envelope (PSG)
     released_at: int | None = None
+    off_frame: int = -10 ** 9  # quadro do último key-off (a cauda do release soa depois dele)
 
 
 def _amp_db(vel: int, vol: float, expr: float = 127.0) -> float:
@@ -83,17 +95,53 @@ def _psg_period(hz: float) -> int:
     return int(min(1023, max(1, round(NTSC_PSG_CLOCK / (32.0 * hz)))))
 
 
+# Registradores que podem ser omitidos quando o valor já está no chip: os dos operadores
+# ($30–$9F) e algoritmo/pan ($B0–$B6). Ficam de fora: $28 (key), $2A/$2B (DAC), $22/$27
+# (LFO, timer/CH3) e a frequência ($A0–$AF) — no YM2612 a parte alta da frequência fica num
+# registrador de trava compartilhado, então a escrita de $A4–$A6 tem de vir sempre antes da $A0.
+def _cacheable(reg: int) -> bool:
+    return 0x30 <= reg <= 0x9F or 0xB0 <= reg <= 0xB6
+
+
+def _drop_redundant_fm(frames: list[list[tuple]], loop_frame: int | None) -> int:
+    """Tira escritas FM que repetem o valor que o registrador já tem (como o Furnace faz).
+    No ponto de loop a memória é zerada: ao voltar do fim, o chip está no estado do fim da
+    música, não no do começo do loop. Devolve quantas escritas saíram."""
+    state: dict[tuple[int, int], int] = {}
+    dropped = 0
+    for f, ws in enumerate(frames):
+        if f == loop_frame:
+            state.clear()
+        out = []
+        for w in ws:
+            if w[0] == "fm" and _cacheable(w[2]):
+                k = (w[1], w[2])
+                if state.get(k) == w[3]:
+                    dropped += 1
+                    continue
+                state[k] = w[3]
+            out.append(w)
+        ws[:] = out
+    return dropped
+
+
 class Driver:
     def __init__(self, song: Song, plan: Plan, patches: dict[tuple[int, int], Patch],
                  psg_envelopes: dict[tuple[int, int], dict] | None = None,
                  kit=None, fm_clock: int = NTSC_FM_CLOCK, vibrato: bool = True,
-                 fm_att_db: float = 0.0, psg_att_db: float = 0.0, loop="markers"):
+                 fm_att_db: float = 0.0, psg_att_db: float = 0.0, loop="markers",
+                 fm_alloc: str = "dinamico"):
         """``loop``: um :class:`~mdconv.arrange.loop.LoopPoint`, ``None`` (sem loop) ou
         ``"markers"`` (lê loopStart/loopEnd do MIDI — compatibilidade)."""
         if loop == "markers":
             from mdconv.arrange.loop import resolve_loop
             loop = resolve_loop(song, "markers")
         self.loop = loop
+        if fm_alloc not in ("dinamico", "fixo"):
+            raise ValueError(f"alocação FM desconhecida: {fm_alloc}")
+        self.fm_alloc = fm_alloc
+        self.homes: dict[tuple, list[int]] = {}      # parte → canais FM próprios (modo fixo)
+        self.home_of: dict[int, tuple] = {}
         # Linha do tempo por canal do chip (para exportar a mesma distribuição para
         # trackers): ('on', quadro, tipo, canal, nota) · ('off', quadro, tipo, canal) ·
         # ('release', quadro, 'psg', canal) · ('pcm', quadro, canal_pcm, nota, id_amostra)
@@ -111,7 +159,11 @@ class Driver:
         self.curves = _channel_curves(song)
         self.changes: list[str] = []
         self.counts = {"fm": 0, "psg_planned": 0, "psg_overflow": 0, "migrated": 0, "shortened": 0,
-                       "omitted": 0, "pcm": 0, "pcm_stolen": 0, "pcm_cut_tail": 0, "pcm_missing": 0, "patch_loads": 0}
+                       "omitted": 0, "pcm": 0, "pcm_stolen": 0, "pcm_cut_tail": 0, "pcm_missing": 0, "patch_loads": 0,
+                       "noise": 0, "noise_cut": 0, "noise_lost": 0, "noise_clamped": 0, "fm_borrowed": 0,
+                       "fm_to_psg": 0}
+        self._nz: dict | None = None      # voz de ruído: peça, início, nota, prioridade, delta
+        self._nz_vol: int | None = None
 
     # ---------------------------------------------------------------- utilidades
     def _curve(self, n: Note):
@@ -190,6 +242,7 @@ class Driver:
             self.timeline.append(("off", self._frame, "fm", ch))
         v.note = None
         v.part = None
+        v.off_frame = self._frame
 
     # ---------------------------------------------------------------- escrita de voz PSG
     def _psg_env_db(self, v: _Voice, frame: int) -> float:
@@ -247,6 +300,8 @@ class Driver:
         pplan = {p.key: p for p in plan.parts}
         n_fm = plan.fm_capacity
         fm = [_Voice("fm", i) for i in range(n_fm)]
+        if self.fm_alloc == "fixo":
+            self._assign_homes(plan, n_fm)
         psg = [_Voice("psg", i) for i in range(plan.psg_capacity)]
         pcm_ch = list(plan.pcm_channels)
         pcm_busy: dict[int, tuple[int, int, int]] = {}  # canal → (fim, prioridade, início)
@@ -284,6 +339,7 @@ class Driver:
                 for v in fm + psg:
                     v.reload = True       # a nota que ainda soa continua com o patch atual
                     v.last_tl = v.last_freq = v.last_pan = v.last_vol = None
+                self._nz_vol = None
             # fins de nota
             for v in fm:
                 if v.note is not None and f >= v.end_frame:
@@ -303,6 +359,10 @@ class Driver:
             for n in new:
                 p = pplan[(n.track, n.channel)]
                 ef = end_frame(n)
+                if self.kit is not None and (n.bank, n.program, n.key) in self.kit.noise \
+                        and p.kind.startswith("kit"):
+                    self._start_noise(w, n, f, p)
+                    continue
                 if p.pool == "PCM":
                     self._start_pcm(w, n, f, pcm_ch, pcm_busy, p)
                     continue
@@ -324,9 +384,12 @@ class Driver:
             for v in psg:
                 if v.note is not None:
                     self._psg_update(w, v, f)
+            if self._nz is not None:
+                self._noise_update(w, f)
 
         while frames and not frames[-1]:
             frames.pop()
+        self.counts["fm_redundant"] = _drop_redundant_fm(frames, loop_frame)
         stats = dict(self.counts)
         stats["notes_total"] = len(song.notes)
         stats["frames"] = len(frames)
@@ -345,34 +408,127 @@ class Driver:
             self.changes.append(f"{self._when(f)} {p.label}: sem patch FM aprovado para "
                                 f"{n.bank}:{n.program} — nota omitida")
             return False
+        patch = self.patches.get((n.bank, n.program))
         free = [v for v in fm if v.note is None]
-        if free:
-            same = [v for v in free if v.patch_id is self.patches.get((n.bank, n.program)) and not v.reload]
+        if self.fm_alloc == "fixo":
+            v = self._choose_fixed(w, fm, psg, n, p, f, ef, pplan, free, patch)
+            if v is None:
+                return False
+        elif free:
+            same = [v for v in free if v.patch_id is patch and not v.reload]
             v = (same or free)[0]
         else:
-            victim = min(fm, key=lambda v: (v.prio, -v.start_frame))
-            if victim.prio >= p.priority:
+            v = self._steal_fm(w, psg, p, f, pplan, min(fm, key=lambda v: (v.prio, -v.start_frame)))
+            if v is None:
                 return False
-            vp = pplan[victim.part]
-            # a nota deslocada tenta continuar no PSG
-            moved = False
-            if vp.overflow_psg or vp.pool == "PSG":
-                if PSG_MIN_KEY <= victim.note.key <= PSG_MAX_KEY:
-                    moved = self._place_psg(w, psg, victim.note, vp, f, victim.end_frame,
-                                            overflow=True, migrated=True)
-            if moved:
-                self.counts["migrated"] += 1
-            else:
-                self.counts["shortened"] += 1
-                self.changes.append(f"{self._when(f)} {vp.label} {self._nn(victim.note)}: encurtada "
-                                    f"para dar o canal FM a {p.label} (prioridade {p.priority} > {vp.priority})")
-            self._fm_stop(w, victim)
-            v = victim
         v.prio = p.priority
         v.end_frame = ef
         self._fm_start(w, v, n, f)
         self.counts["fm"] += 1
         return True
+
+    def _choose_fixed(self, w, fm, psg, n, p, f, ef, pplan, free, patch):
+        home = self.homes.get(p.key) or []
+
+        def oldest_silent(vs):
+            same = [v for v in vs if v.patch_id is patch and not v.reload]
+            return min(same or vs, key=lambda v: v.off_frame)
+        free_home = [v for v in free if v.idx in home]
+        if free_home:
+            return oldest_silent(free_home)
+        shared = [v for v in free if v.idx not in self.home_of]
+        if shared:
+            return oldest_silent(shared)
+        # como no tracker: a voz que não cabe nos canais da parte vai para o PSG, se a parte
+        # puder transbordar para lá (o chamador cuida disso) — antes de mexer no canal alheio
+        if p.overflow_psg and PSG_MIN_KEY <= n.key <= PSG_MAX_KEY and any(v.note is None for v in psg):
+            self.counts["fm_to_psg"] += 1
+            return None
+        # canal livre de outra parte: o dono que não está tocando há mais tempo
+        borrowed = [v for v in free if v.idx in self.home_of]
+        if borrowed:
+            self.counts["fm_borrowed"] += 1
+            return oldest_silent(borrowed)
+        # sem canal livre: recupera o próprio canal de quem o pegou emprestado
+        lenders = [fm[c] for c in home if fm[c].part != p.key and fm[c].prio <= p.priority]
+        if lenders:
+            return self._steal_fm(w, psg, p, f, pplan, min(lenders, key=lambda v: (v.prio, -v.start_frame)),
+                                  allow_equal=True)
+        victim = min(fm, key=lambda v: (v.prio, -v.start_frame))
+        if victim.prio < p.priority:
+            return self._steal_fm(w, psg, p, f, pplan, victim)
+        if home:
+            # a parte já ocupa todos os seus canais: a nota mais antiga dela dá lugar à nova
+            own = min((fm[c] for c in home), key=lambda v: v.start_frame)
+            if own.part == p.key:
+                self.counts["shortened"] += 1
+                self.changes.append(f"{self._when(f)} {p.label} {self._nn(own.note)}: encurtada "
+                                    f"(a parte já ocupa os seus {len(home)} canal(is) FM)")
+                self._fm_stop(w, own)
+                return own
+        return None
+
+    def _steal_fm(self, w, psg, p, f, pplan, victim, allow_equal: bool = False):
+        """Tira o canal de ``victim`` (a nota tenta continuar no PSG); ``None`` se ela vale
+        mais que a nota nova."""
+        if victim.prio > p.priority or (victim.prio == p.priority and not allow_equal):
+            return None
+        vp = pplan[victim.part]
+        moved = False
+        if vp.overflow_psg or vp.pool == "PSG":
+            if PSG_MIN_KEY <= victim.note.key <= PSG_MAX_KEY:
+                moved = self._place_psg(w, psg, victim.note, vp, f, victim.end_frame,
+                                        overflow=True, migrated=True)
+        if moved:
+            self.counts["migrated"] += 1
+        else:
+            self.counts["shortened"] += 1
+            self.changes.append(f"{self._when(f)} {vp.label} {self._nn(victim.note)}: encurtada "
+                                f"para dar o canal FM a {p.label} (prioridade {p.priority} ≥ {vp.priority})")
+        self._fm_stop(w, victim)
+        return victim
+
+    # ---------------------------------------------------------------- canais fixos
+    def _assign_homes(self, plan, n_fm: int) -> None:
+        """Canais FM próprios: as partes mais importantes primeiro, um canal cada; depois
+        canais extras para as partes polifônicas (até 3 vozes). Se houver mais partes que
+        canais, sobra ao menos um canal sem dono para as outras dividirem."""
+        fm_parts = [p for p in plan.parts if p.pool == "FM"]
+        if not fm_parts or n_fm <= 0:
+            return
+        # donos de canal: melodia e baixo primeiro; depois as partes que mais tempo tocam.
+        # Ecos e partes quase sem notas dividem o canal compartilhado.
+        total = sum(p.note_count for p in fm_parts) or 1
+        cands = [p for p in fm_parts if p.role != "eco" and p.note_count >= 0.05 * total]
+        cands.sort(key=lambda p: (-(p.role in ("melodia", "baixo")), -p.active, -p.note_count, p.channel))
+        rest = [p for p in fm_parts if p not in cands]
+        n_own = len(cands) if (len(cands) < n_fm or (len(cands) == n_fm and not rest)) else n_fm - 1
+        free = list(range(n_fm))
+        owners = cands[:n_own]
+        parts = fm_parts
+        keep = 1 if len(fm_parts) > n_own else 0
+        for p in owners:
+            self.homes[p.key] = [free.pop(0)]
+        for p in owners:
+            want = min(max(p.polyphony, 1), 3) - 1
+            while want > 0 and len(free) > keep:
+                self.homes[p.key].append(free.pop(0))
+                want -= 1
+        for k, chs in self.homes.items():
+            for c in chs:
+                self.home_of[c] = k
+        self._home_labels = {p.key: p.label for p in parts}
+
+    def homes_text(self) -> list[str]:
+        L = []
+        for k, chs in sorted(self.homes.items(), key=lambda kv: kv[1]):
+            L.append(f"  {', '.join(f'FM{c + 1}' for c in chs)}: {self._home_labels.get(k, k)}")
+        shared = [c for c in range(self.plan.fm_capacity) if c not in self.home_of]
+        if shared:
+            L.append(f"  {', '.join(f'FM{c + 1}' for c in shared)}: compartilhado pelas outras partes FM")
+        L.append(f"  vozes extras no PSG: {self.counts['fm_to_psg']} · empréstimos de canal: "
+                 f"{self.counts['fm_borrowed']} · cargas de patch: {self.counts['patch_loads']}")
+        return L
 
     def _place_psg(self, w, psg, n, p, f, ef, overflow: bool, migrated: bool = False) -> bool:
         if not (PSG_MIN_KEY <= n.key <= PSG_MAX_KEY):
@@ -395,6 +551,46 @@ class Driver:
         if not migrated:
             self.counts["psg_overflow" if overflow else "psg_planned"] += 1
         return True
+
+    # ---------------------------------------------------------------- ruído do PSG
+    def _start_noise(self, w, n, f, p) -> None:
+        piece = self.kit.noise[(n.bank, n.program, n.key)]
+        cur = self._nz
+        if cur is not None:
+            if cur["start"] == f and cur["prio"] > piece.priority:
+                self.counts["noise_lost"] += 1
+                self.changes.append(f"{self._when(f)} {p.label} {self._nn(n)} (ruído): omitida — "
+                                    f"peça mais forte no mesmo instante")
+                return
+            self.counts["noise_cut"] += 1
+            self.timeline.append(("off", f, "noise", 0))
+        # velocity da nota em relação à da amostra de referência (amplitude linear, como no m4a)
+        delta = 20 * np.log10(piece.vel_ref / max(1, n.velocity))
+        self._nz = {"piece": piece, "start": f, "note": n, "prio": piece.priority, "delta": delta}
+        w.append(("psg", 0xE0 | 0x04 | (piece.nf & 3)))     # ruído branco; reinicia o LFSR
+        self._nz_vol = None
+        self.timeline.append(("on", f, "noise", 0, n))
+        self.counts["noise"] += 1
+
+    def _noise_update(self, w, f) -> None:
+        nz = self._nz
+        k = f - nz["start"]
+        att = nz["piece"].att_db
+        vol = 15
+        if k < len(att):
+            x = (att[k] + nz["delta"]) / 2.0
+            if x < 0:
+                self.counts["noise_clamped"] += 1
+            vol = int(min(15, max(0, round(x))))
+        if vol >= 15:
+            w.append(("psg", 0xFF))
+            self.timeline.append(("off", f, "noise", 0))
+            self._nz = None
+            self._nz_vol = 15
+            return
+        if vol != self._nz_vol:
+            w.append(("psg", 0xF0 | vol))
+            self._nz_vol = vol
 
     def _start_pcm(self, w, n, f, pcm_ch, pcm_busy, p) -> None:
         if not self.kit or (n.bank, n.program, n.key) not in self.kit.ids:

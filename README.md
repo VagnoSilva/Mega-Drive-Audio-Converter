@@ -1,9 +1,59 @@
-# Mega Drive Audio Converter
+# Mega Drive Audio Converter — versão 0.10.0
 
-Conversor de músicas de GBA (MIDI + SoundFont extraídos pelo GBA Mus Ripper) para o
-som do Mega Drive (YM2612 + SN76489), com exportação VGM e, depois, XGM para SGDK.
+Conversor de músicas (MIDI + SoundFont) para o som do Mega Drive (YM2612 + SN76489 + PCM),
+com exportação XGM v1 (SGDK), VGM e Furnace.
 
-Estado atual: **Fase 3 — motor FM e patches YM2612** (Fases 1 e 2 aprovadas).
+A janela tem duas abas:
+- **Extração** — tira MIDI + SoundFont direto da ROM: arcades **Capcom CPS1** (.zip do MAME) e
+  **Game Boy Advance** (.gba, motor de som da Nintendo). Na CPS1 os timbres FM originais (YM2151)
+  já saem convertidos para YM2612 numa biblioteca de patches aprovados. O botão
+  "Abrir na conversão" leva a música escolhida para a outra aba.
+- **Conversão** — o conversor de sempre. Também aceita MIDI + SF2 do GBA Mus Ripper.
+
+O código da extração fica em `mdconv/extract/` (o mesmo do extrator independente da pasta
+`cps1_extractor`, versão em `mdconv/extract/__init__.py`).
+
+A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda → Sobre e em
+`python -m mdconv.cli --version`).
+
+## Histórico de versões
+
+**0.10.0**
+- Extrator embutido: aba **Extração** (CPS1 e GBA) ao lado da aba **Conversão**. Depois de
+  extrair, "Abrir na conversão" preenche MIDI, SoundFont e, na CPS1, a biblioteca de patches do jogo.
+- GBA direto da ROM: mesmo resultado do GBA Mus Ripper (numeração das músicas, bancos, nomes no
+  SoundFont, curva de força e volume), então os patches aprovados e a classificação de bateria/PSG
+  continuam iguais.
+
+**0.9.3**
+- CPS2 (QSound) retirado das origens suportadas: nos testes o resultado não ficou bom. CPS1 continua.
+
+**0.9.2**
+- Histórico de decisões: cada candidato aprovado, recusado (botão novo "✖ Recusar") ou ouvido fica
+  registrado em `%USERPROFILE%\.mdconv\decisoes.jsonl`, com tipo e papel do instrumento, opções
+  da busca, origem do candidato e custos medidos — base para, no futuro, ajustar a ordem dos
+  candidatos, as opções de busca por tipo de instrumento e a medida de semelhança ao seu ouvido.
+  Resumo em Arquivo → "Histórico de decisões…".
+- Candidatos recusados aparecem marcados e o rascunho automático não os escolhe.
+
+**0.9.1**
+- Patches travados por música: ao salvar o projeto (`.mdcproj`), os patches FM usados ficam
+  gravados nele; aprovar patches em outras músicas não muda mais esta. Ao abrir, o programa avisa se
+  a biblioteca tem versões diferentes e pergunta se quer atualizar (menu Arquivo também tem
+  "Atualizar patches travados" e "Destravar patches desta música").
+- Sugestões da biblioteca: ao gerar candidatos, os patches já aprovados para sons parecidos (de
+  qualquer música/jogo) entram como candidatos, como estão e refinados.
+- Rascunho automático: gera e aprova o melhor candidato de todos os instrumentos FM sem patch,
+  marcados como "rascunho" para revisão.
+- Furnace: andamento correto para MIDIs com qualquer resolução (antes só 24 ticks por semínima;
+  os da CPS1 usam 48). Os do GBA saem idênticos à versão anterior.
+- Banco de patches .tfi vazio não causa mais erro ao gerar candidatos.
+
+**0.9.0** — versão anterior (GBA).
+
+## Planejado
+
+- Konami (geração de *Turtles in Time*: YM2151 + K053260) na aba Extração.
 
 ## Requisitos
 

@@ -19,7 +19,11 @@ from PySide6.QtWidgets import (
 
 from mdconv.app.project import PROJECT_SUFFIX, Cancelled, Project, ProjectSettings
 
+from mdconv import __version__
+from mdconv.extract import __version__ as extract_version
+
 APP_NAME = "Mega Drive Audio Converter"
+APP_TITLE = f"{APP_NAME} {__version__}"
 
 try:  # o player é opcional: sem QtMultimedia, os WAVs abrem no player do sistema
     from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -86,7 +90,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_TITLE)
         self.resize(1180, 780)
         self.qsettings = QSettings("mdconv", APP_NAME)
         self.project: Project | None = None
@@ -106,6 +110,8 @@ class MainWindow(QMainWindow):
             self.player = None
 
         self._build_menu()
+        from mdconv.gui.extract_tab import ExtractTab
+        self.extract_tab = ExtractTab(open_in_converter=self.open_from_extraction)
         central = QWidget()
         v = QVBoxLayout(central)
         v.addWidget(self._build_files())
@@ -120,7 +126,11 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
         v.addWidget(split, 1)
-        self.setCentralWidget(central)
+        self.main_tabs = QTabWidget()
+        self.main_tabs.addTab(self.extract_tab, "Extração")
+        self.main_tabs.addTab(central, "Conversão")
+        self.main_tabs.setCurrentIndex(1)
+        self.setCentralWidget(self.main_tabs)
         self._settings_to_widgets(ProjectSettings(
             library=self.qsettings.value("library", str(Path.home() / "mdconv" / "biblioteca_patches")),
             bank=self.qsettings.value("bank", ""),
@@ -138,6 +148,16 @@ class MainWindow(QMainWindow):
             a.setShortcut(key)
             a.triggered.connect(slot)
             m.addAction(a)
+        m.addSeparator()
+        u = QAction("Atualizar patches travados pela biblioteca…", self)
+        u.triggered.connect(self.update_pinned)
+        m.addAction(u)
+        d = QAction("Destravar patches desta música…", self)
+        d.triggered.connect(self.unpin_all)
+        m.addAction(d)
+        h = QAction("Histórico de decisões…", self)
+        h.triggered.connect(self.show_decisions)
+        m.addAction(h)
         m.addSeparator()
         t = QAction("Montar banco de patches .tfi…", self)
         t.triggered.connect(self.build_tfi_bank)
@@ -158,7 +178,7 @@ class MainWindow(QMainWindow):
         self.ed_library, self.ed_out = QLineEdit(), QLineEdit()
         self.ed_bank = QLineEdit()
         for ed, label, kind, filt in (
-                (self.ed_midi, "MIDI (GBA Mus Ripper):", "file", "MIDI (*.mid *.midi)"),
+                (self.ed_midi, "MIDI:", "file", "MIDI (*.mid *.midi)"),
                 (self.ed_sf2, "SoundFont (.sf2):", "file", "SoundFont (*.sf2)"),
                 (self.ed_library, "Biblioteca de patches:", "dir", None),
                 (self.ed_bank, "Banco de patches prontos:", "dir", None),
@@ -213,14 +233,26 @@ class MainWindow(QMainWindow):
         self.ck_bank = QCheckBox("Incluir candidatos do banco de patches prontos")
         self.ck_bank.setChecked(True)
         self.ck_bank_only = QCheckBox("Só do banco (bem mais rápido)")
+        self.ck_lib = QCheckBox("Incluir patches parecidos que já aprovei (biblioteca)")
+        self.ck_lib.setChecked(True)
+        self.ck_lib.setToolTip("Compara o som com os patches aprovados em outras músicas e jogos e "
+                               "oferece os mais parecidos (como estão e refinados). Quanto mais você "
+                               "aprova, melhores ficam as sugestões.")
         self.bt_fit = QPushButton("Gerar candidatos")
         self.bt_fit.clicked.connect(self.fit_selected)
+        self.bt_auto = QPushButton("⚡ Rascunho automático (todos os instrumentos)")
+        self.bt_auto.setToolTip("Para cada instrumento FM ainda sem patch aprovado: gera os candidatos "
+                                "e aprova o de menor custo, marcado como rascunho. Depois é só ouvir e "
+                                "trocar os que não ficaram bons.")
+        self.bt_auto.clicked.connect(self.auto_approve_all)
         fl.addRow("Busca:", self.cb_budget)
         fl.addRow("Feedback máximo:", self.sp_fb)
         fl.addRow(self.ck_detune)
         fl.addRow(self.ck_bank)
         fl.addRow(self.ck_bank_only)
+        fl.addRow(self.ck_lib)
         fl.addRow(self.bt_fit)
+        fl.addRow(self.bt_auto)
         v.addWidget(g)
         v.addWidget(QLabel("Candidatos (em cada WAV: original, depois FM, nota por nota):"))
         self.ls_cand = QListWidget()
@@ -231,13 +263,18 @@ class MainWindow(QMainWindow):
         self.bt_play_cand.clicked.connect(self.play_candidate)
         self.bt_approve = QPushButton("✔ Aprovar escolhido")
         self.bt_approve.clicked.connect(self.approve_candidate)
+        self.bt_reject = QPushButton("✖ Recusar")
+        self.bt_reject.setToolTip("Ouviu e não gostou: fica registrado no histórico de decisões "
+                                  "(usado para melhorar as sugestões) e o rascunho automático o ignora.")
+        self.bt_reject.clicked.connect(self.reject_candidate)
         h.addWidget(self.bt_play_cand)
         h.addWidget(self.bt_approve)
+        h.addWidget(self.bt_reject)
         v.addLayout(h)
         w.addWidget(side)
         w.setStretchFactor(0, 3)
         w.setStretchFactor(1, 2)
-        self._busy_widgets += [self.bt_fit, self.bt_approve]
+        self._busy_widgets += [self.bt_fit, self.bt_approve, self.bt_auto, self.bt_reject]
         return w
 
     def _build_arrangement_tab(self) -> QWidget:
@@ -564,7 +601,7 @@ class MainWindow(QMainWindow):
         self.tx_export.clear()
         self.lb_loop.setText("—")
         self._set_loaded(False)
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(APP_TITLE)
 
     def open_project(self):
         p, _ = QFileDialog.getOpenFileName(self, "Abrir projeto", str(Path.home()),
@@ -585,8 +622,18 @@ class MainWindow(QMainWindow):
             return self.save_project_as()
         s = self.project.settings if self.project else ProjectSettings()
         self._widgets_to_settings(s)
+        if self.project and self.project.song is not None:
+            try:
+                new = self.project.pin_patches()
+            except Exception as e:          # travar é extra: não impede salvar
+                new = []
+                self._log(f"⚠ não consegui travar os patches: {e}")
+            if new:
+                self._log(f"🔒 {len(new)} patch(es) travado(s) no projeto: " + ", ".join(new))
+                self._fill_instruments(self.project.instruments())
         self.project_path = s.save(self.project_path)
-        self._log(f"Projeto salvo: {self.project_path}")
+        n = len(s.pinned_patches or {})
+        self._log(f"Projeto salvo: {self.project_path} ({n} patch(es) FM travado(s))")
 
     def save_project_as(self):
         start = str(Path(self.ed_out.text() or Path.home()) / (Path(self.ed_midi.text()).stem + PROJECT_SUFFIX))
@@ -594,6 +641,18 @@ class MainWindow(QMainWindow):
         if p:
             self.project_path = Path(p)
             self.save_project()
+
+    def open_from_extraction(self, midi: str, sf2: str, library: str | None):
+        """Botão "Abrir na conversão" da aba Extração."""
+        if self.task is not None:
+            self._error("Espere a tarefa em andamento terminar.")
+            return
+        self.ed_midi.setText(midi)
+        self.ed_sf2.setText(sf2)
+        if library:
+            self.ed_library.setText(library)
+        self.main_tabs.setCurrentIndex(1)
+        self.load_song()
 
     def load_song(self):
         s = self._widgets_to_settings()
@@ -620,7 +679,7 @@ class MainWindow(QMainWindow):
 
     def _loaded(self, project: Project, warnings, rows, loop):
         self.project = project
-        self.setWindowTitle(f"{APP_NAME} — {Path(project.settings.midi).name}")
+        self.setWindowTitle(f"{APP_TITLE} — {Path(project.settings.midi).name}")
         for w in warnings:
             self._log(f"⚠ {w}")
         self._fill_instruments(rows)
@@ -630,7 +689,58 @@ class MainWindow(QMainWindow):
         self._set_loaded(True)
         self._set_busy(False)
         n_prov = sum(1 for r in rows if r.status == "provisório")
-        self._log(f"✔ {len(rows)} instrumentos; {n_prov} ainda sem patch FM aprovado.")
+        n_pin = sum(1 for r in rows if r.pinned)
+        self._log(f"✔ {len(rows)} instrumentos; {n_prov} ainda sem patch FM aprovado"
+                  + (f"; {n_pin} com patch travado no projeto." if n_pin else "."))
+        if n_pin:
+            self._offer_pin_update(on_open=True)
+
+    # ------------------------------------------------------------- patches travados
+    def _offer_pin_update(self, on_open: bool = False) -> bool:
+        try:
+            diffs = self.project.pin_differences()
+        except Exception as e:
+            self._log(f"⚠ não consegui comparar com a biblioteca: {e}")
+            return False
+        if not diffs:
+            if not on_open:
+                QMessageBox.information(self, APP_NAME, "Os patches travados já são iguais aos da biblioteca.")
+            return False
+        lista = "\n".join(f"• {d['label']}  (travado: {d['pinned_at'] or '?'} · biblioteca: "
+                          f"{d['library_at'] or '?'})" for d in diffs)
+        msg = (f"A biblioteca tem patches diferentes dos travados neste projeto para "
+               f"{len(diffs)} instrumento(s):\n\n{lista}\n\n"
+               "Atualizar esta música para os patches da biblioteca?\n"
+               "(Não = manter os travados: a música continua soando como foi salva.)")
+        if QMessageBox.question(self, APP_NAME, msg) != QMessageBox.Yes:
+            self._log("🔒 Mantidos os patches travados do projeto.")
+            return False
+        done = self.project.update_pins([d["key"] for d in diffs])
+        self._fill_instruments(self.project.instruments())
+        self._log("🔒 Travas atualizadas pela biblioteca: " + ", ".join(done) + ". Salve o projeto para manter.")
+        return True
+
+    def update_pinned(self):
+        if not self.project or self.project.song is None:
+            self._error("Abra uma música primeiro.")
+            return
+        if not self.project.settings.pinned_patches:
+            QMessageBox.information(self, APP_NAME, "Esta música ainda não tem patches travados "
+                                    "(eles são travados ao salvar o projeto).")
+            return
+        self._offer_pin_update()
+
+    def unpin_all(self):
+        if not self.project or not self.project.settings.pinned_patches:
+            QMessageBox.information(self, APP_NAME, "Esta música não tem patches travados.")
+            return
+        if QMessageBox.question(self, APP_NAME, "Destravar todos os patches desta música? Ela passa a usar "
+                                "os patches atuais da biblioteca (até salvar o projeto de novo, que trava "
+                                "outra vez).") != QMessageBox.Yes:
+            return
+        self.project.unpin()
+        self._fill_instruments(self.project.instruments())
+        self._log("🔓 Patches destravados: a música segue a biblioteca até o próximo salvamento.")
 
     # ------------------------------------------------------------- instrumentos
     def _fill_instruments(self, rows):
@@ -642,8 +752,8 @@ class MainWindow(QMainWindow):
         for i, r in enumerate(rows):
             vals = [r.label, ", ".join(f"C{c}" for c in r.channels), str(r.notes), ", ".join(r.roles),
                     " + ".join(r.pools), r.chip_text() or "—",
-                    r.status + (f" ({len(r.candidates)} cand.)"
-                                if r.candidates and r.status != "aprovado" else "")]
+                    r.status + (" (rascunho)" if r.auto else "") + (" 🔒" if r.pinned else "")
+                    + (f" ({len(r.candidates)} cand.)" if r.candidates and r.status != "aprovado" else "")]
             for j, val in enumerate(vals):
                 it = QTableWidgetItem(val)
                 if j == 5:
@@ -694,7 +804,10 @@ class MainWindow(QMainWindow):
         self.bt_fit.setEnabled(r.needs_fm and self.task is None)
         current = 0
         for i, c in enumerate(r.candidates):
-            it = QListWidgetItem(("✔ APROVADO  " if c.approved else "") + f"#{c.rank}  {c.summary}")
+            it = QListWidgetItem(("✔ APROVADO  " if c.approved else "✖ RECUSADO  " if c.rejected else "")
+                                 + f"#{c.rank}  {c.summary}")
+            if c.rejected and not c.approved:
+                it.setForeground(Qt.gray)
             it.setData(Qt.UserRole, c)
             if c.approved:
                 f = it.font()
@@ -712,14 +825,51 @@ class MainWindow(QMainWindow):
         self.stop_audio()            # libera os WAVs antigos (o Windows trava arquivo aberto)
         budget, fb, det = self.cb_budget.currentData(), self.sp_fb.value(), self.ck_detune.isChecked()
         use_bank, bank_only = self.ck_bank.isChecked(), self.ck_bank_only.isChecked()
+        use_lib = self.ck_lib.isChecked()
         self._sync_settings()
         project = self.project
 
         def work(progress):
             project.fit(r.key, budget=budget, max_fb=fb, detune=det, progress=progress,
-                        use_bank=use_bank, bank_only=bank_only and use_bank)
+                        use_bank=use_bank, bank_only=bank_only and use_bank, use_library=use_lib)
             return project.instruments()
         self._run(f"Gerando candidatos FM para {r.label}", work, self._after_instruments)
+
+    def auto_approve_all(self):
+        if not self.project or self.project.song is None:
+            self._error("Abra uma música primeiro.")
+            return
+        rows = [r for r in self._rows if r.needs_fm and r.status == "provisório"]
+        if not rows:
+            QMessageBox.information(self, APP_NAME, "Todos os instrumentos FM já têm patch aprovado.")
+            return
+        budget, fb = self.cb_budget.currentData(), self.sp_fb.value()
+        use_bank, use_lib = self.ck_bank.isChecked(), self.ck_lib.isChecked()
+        if QMessageBox.question(
+                self, APP_NAME,
+                f"Gerar candidatos e aprovar automaticamente o melhor para {len(rows)} instrumento(s)?\n\n"
+                + "\n".join(f"• {r.label}" for r in rows[:15]) + ("\n…" if len(rows) > 15 else "")
+                + f"\n\nBusca: {self.cb_budget.currentText()}. Pode levar alguns minutos por instrumento.\n"
+                "Os patches entram como RASCUNHO: ouça a música e troque os que não ficarem bons.") \
+                != QMessageBox.Yes:
+            return
+        self.stop_audio()
+        self._sync_settings()
+        project = self.project
+
+        def work(progress):
+            done = project.auto_approve(budget=budget, max_fb=fb, use_bank=use_bank,
+                                        use_library=use_lib, progress=progress)
+            return done, project.instruments()
+
+        def finished(result):
+            done, rows = result
+            self._fill_instruments(rows)
+            for d in done:
+                self._log(f"⚡ rascunho: {d}")
+            self._log(f"✔ {len(done)} instrumento(s) com patch de rascunho. Ouça a prévia da música e "
+                      "aprove outro candidato onde precisar.")
+        self._run("Rascunho automático", work, finished)
 
     def _after_instruments(self, rows):
         self._fill_instruments(rows)
@@ -741,9 +891,43 @@ class MainWindow(QMainWindow):
         return it.data(Qt.UserRole) if it else None
 
     def play_candidate(self):
-        c = self._selected_candidate()
+        c, r = self._selected_candidate(), self._selected_row()
         if c:
             self._play(c.wav)
+            if self.project and r:
+                self.project.listened(r.key, c.rank)
+
+    def reject_candidate(self):
+        r, c = self._selected_row(), self._selected_candidate()
+        if not (self.project and r and c):
+            self._error("Selecione o instrumento e o candidato.")
+            return
+        if c.approved:
+            self._error("Este candidato está aprovado. Aprove outro antes de recusar este.")
+            return
+        try:
+            self.project.reject(r.key, c.rank)
+        except ValueError as e:
+            self._error(str(e))
+            return
+        self._log(f"✖ {r.label}: candidato #{c.rank} recusado ({c.origin or 'busca'}).")
+        self._fill_instruments(self.project.instruments())
+
+    def show_decisions(self):
+        from mdconv.library.decisions import summary
+        s = summary()
+        ev = s["eventos"]
+        lines = [f"Arquivo: {s['arquivo']}", "",
+                 f"Aprovados: {ev.get('aprovado', 0)} · Recusados: {ev.get('recusado', 0)} · "
+                 f"Rascunhos automáticos: {ev.get('rascunho_auto', 0)} · Audições: {ev.get('ouviu', 0)}", ""]
+        if s["por_origem"]:
+            lines.append("Por origem do candidato (aprovados / recusados):")
+            for k, v in sorted(s["por_origem"].items()):
+                lines.append(f"  • {k}: {v.get('aprovado', 0)} / {v.get('recusado', 0)}")
+        lines += ["", "Cada aprovação e recusa fica registrada com o tipo de instrumento, as opções "
+                  "da busca e os custos medidos. Com algumas centenas de decisões, esses dados "
+                  "servem para ajustar as sugestões ao seu ouvido."]
+        QMessageBox.information(self, APP_NAME, "\n".join(lines))
 
     def approve_candidate(self):
         r, c = self._selected_row(), self._selected_candidate()
@@ -915,20 +1099,29 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- outros
     def about(self):
         QMessageBox.about(self, APP_NAME,
-                          f"<b>{APP_NAME}</b><br>Converte músicas de GBA (MIDI + SF2) para o som do "
-                          "Mega Drive: YM2612 (FM), SN76489 (PSG) e PCM, exportando XGM v1 (SGDK) e VGM."
+                          f"<b>{APP_NAME}</b> — versão {__version__}<br><br>"
+                          "Converte músicas (MIDI + SF2) para o som do Mega Drive: YM2612 (FM), "
+                          "SN76489 (PSG) e PCM, exportando XGM v1 (SGDK), VGM e Furnace."
+                          "<br><br><b>Origens suportadas:</b>"
+                          "<br>• <b>GBA</b> — MIDI + SF2 da aba Extração (motor de som da Nintendo) "
+                          "ou do GBA Mus Ripper"
+                          "<br>• Arcades Capcom <b>CPS1</b> — MIDI + SF2 da aba Extração, com os timbres "
+                          "FM originais prontos como biblioteca de patches."
+                          f"<br><br>Aba <b>Extração</b>: extrator de áudio {extract_version} "
+                          "(parte CPS1 portada do VGMTrans, licença zlib)."
                           "<br><br>Software livre."
                           "<br><br>Prévia do FM com o <b>Nuked-OPN2</b> © Alexey Khokholov (Nuke.YKT), "
                           "licença GNU LGPL 2.1 ou posterior — código-fonte e licença na pasta "
                           "<code>mdconv/chips/native/nuked_opn2</code>.")
 
     def closeEvent(self, ev):  # noqa: N802 (nome do Qt)
-        if self.task is not None:
+        if self.task is not None or self.extract_tab.busy():
             if QMessageBox.question(self, APP_NAME, "Há uma tarefa em andamento. Sair mesmo assim?") \
                     != QMessageBox.Yes:
                 ev.ignore()
                 return
-            self.task.cancelled = True
+            if self.task is not None:
+                self.task.cancelled = True
         self.stop_audio()
         ev.accept()
 

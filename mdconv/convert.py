@@ -67,6 +67,33 @@ def approved_entries(library_dir: Path | None, sf: SoundFont) -> dict:
     return out
 
 
+def pin_key(bank: int, program: int) -> str:
+    return f"{bank}:{program}"
+
+
+def apply_pinned(patches: dict, pinned: dict | None, sf: SoundFont) -> list[tuple[int, int]]:
+    """Patches travados no projeto substituem os da biblioteca.
+
+    Uma trava só vale se o preset do SF2 atual para (banco, programa) ainda tem o nome
+    gravado na trava (o mesmo critério da biblioteca): trocar de SF2 não aplica o patch de
+    outro instrumento por engano. Devolve as chaves aplicadas."""
+    used = []
+    for k, pin in (pinned or {}).items():
+        try:
+            b, p = (int(x) for x in k.split(":"))
+            patch = Patch.from_dict(pin["patch"])
+        except (ValueError, KeyError, TypeError, AssertionError):
+            continue
+        want = (pin.get("preset") or "").strip()
+        pr = find_preset(sf, b, p).preset
+        have = pr.name.strip() if pr is not None else None
+        if have is None or (want and have != want):
+            continue
+        patches[(b, p)] = patch
+        used.append((b, p))
+    return used
+
+
 def fallback_patch() -> Patch:
     """Patch neutro (seno levemente brilhante) para instrumentos ainda sem patch aprovado."""
     return Patch(alg=4, fb=2, ops=[Operator(mul=1, tl=36, ar=31, d1r=6, sl=4, rr=7),
@@ -96,13 +123,16 @@ def convert(song: Song, sf: SoundFont, library_dir: Path | None, use_pcm: bool =
             balance: str = "auto", fm_att_db: float = 0.0, pcm_headroom_db: float = 3.0,
             loop_mode: str = "auto", loop_start_tick: int | None = None,
             loop_end_tick: int | None = None, noise_metals: bool = False,
-            snap_tempo: bool = False, fm_alloc: str = "dinamico") -> Conversion:
+            snap_tempo: bool = False, fm_alloc: str = "dinamico",
+            pinned: dict | None = None) -> Conversion:
     """``balance='auto'``: o XGM não tem volume para o PCM, então o equilíbrio bateria × resto
     do original é recuperado abaixando FM e PSG (calculado comparando os grupos de partes
     no original e na conversão). ``balance='manual'`` usa ``fm_att_db``.
     ``noise_metals``: chimbais, pratos e afins tocam no ruído do PSG (ver ``mdconv.pcm.kit``).
     ``snap_tempo``: andamento ajustado para o passo rítmico durar um número inteiro de quadros
     (ver ``mdconv.arrange.tempo_grid``).
+    ``pinned``: patches travados no projeto (``ProjectSettings.pinned_patches``); têm
+    prioridade sobre a biblioteca (ver :func:`apply_pinned`).
     ``fm_alloc``: ``"dinamico"`` (canal FM escolhido nota a nota) ou ``"fixo"`` (cada parte
     principal com o seu canal, como um músico faria no tracker) ou ``"auto"`` (roda os dois e
     fica com o que perde menos notas e recarrega menos patches)."""
@@ -113,6 +143,7 @@ def convert(song: Song, sf: SoundFont, library_dir: Path | None, use_pcm: bool =
     loop = resolve_loop(song, loop_mode, loop_start_tick, loop_end_tick)
     plan = make_plan(song, sf, pcm_channels=pcm_channels, use_pcm=use_pcm)
     patches = approved_patches(library_dir, sf)
+    apply_pinned(patches, pinned, sf)
     missing = []
     for p in plan.parts:
         if p.pool == "FM" or p.overflow_psg:

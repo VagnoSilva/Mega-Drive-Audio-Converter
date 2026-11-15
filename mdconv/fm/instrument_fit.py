@@ -93,12 +93,14 @@ def fit_song(song: Song, sf: SoundFont, out_dir: Path, budget: str = "normal",
              only_programs: set[int] | None = None, progress=print,
              max_fb: int = 7, detune: bool = False,
              only: set[tuple[int, int]] | None = None, bank=None, bank_only: bool = False,
-             **fit_kw) -> dict:
+             library_dir: Path | None = None, **fit_kw) -> dict:
     """``only``: só estes (banco, programa). Ajustes anteriores na mesma pasta são mantidos
     (o patches.json é mesclado), então dá para ajustar um instrumento por vez.
     ``fit_kw`` vai direto para :func:`fit_instrument` (ex.: carrier_min_mul, mod_tl_min).
     ``bank``: :class:`~mdconv.library.bank.PatchBank` — acrescenta candidatos vindos de
-    patches prontos (``bank_only`` pula a busca do zero)."""
+    patches prontos (``bank_only`` pula a busca do zero).
+    ``library_dir``: biblioteca de patches — acrescenta candidatos a partir dos patches já
+    aprovados para sons parecidos (ver :func:`~mdconv.fm.fitter.fit_from_library`)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     jobs, skipped = plan_jobs(song, sf)
     old_path = out_dir / "patches.json"
@@ -150,11 +152,33 @@ def fit_song(song: Song, sf: SoundFont, out_dir: Path, budget: str = "normal",
                                mod_tl_min=fit_kw.get("mod_tl_min", 0),
                                progress=lambda s: progress(f"    {s}"))
             res.candidates = list(res.candidates) + bc
+        if library_dir is not None and Path(library_dir).is_dir():
+            from mdconv.fm.fitter import fit_from_library
+            from mdconv.library.patch_library import PatchLibrary
+            approved = [e for e in PatchLibrary(library_dir).entries() if e.approved]
+            if approved:
+                lc = fit_from_library(approved, search, refs, max_fb=max_fb,
+                                      carrier_min_mul=fit_kw.get("carrier_min_mul", 0),
+                                      mod_tl_min=fit_kw.get("mod_tl_min", 0),
+                                      progress=lambda s: progress(f"    {s}"))
+                res.candidates = list(res.candidates) + lc
         res.seconds = _time.time() - t0
         entry = {"label": label, "preset": job.name, "bank": job.bank, "program": job.program,
                  "kind": job.kind, "channels": job.channels,
+                 "options": {"budget": budget, "max_fb": max_fb, "detune": detune,
+                             "bank": bank is not None, "bank_only": bank_only,
+                             "library": library_dir is not None, **fit_kw},
                  "keys": [note_name(k) for k in job.keys], "velocity": job.velocity,
                  "seconds": round(res.seconds, 1), "log": res.log, "candidates": []}
+        # recusas valem para o patch, não para a posição: se a nova busca devolver um patch
+        # que o usuário já recusou para este instrumento, ele continua marcado
+        refused = set()
+        for old in previous:
+            if old.get("label") == label:
+                refused |= {_patch_sig(oc["patch"])
+                            for oc in old.get("candidates", []) if oc.get("rejected")}
+                refused |= set(old.get("refused_patches", []))
+        entry["refused_patches"] = sorted(refused)
         for i, c in enumerate(res.candidates, 1):
             c.patch.name = f"{job.name} #{i}"
             wav = out_dir / f"{label}_cand{i}_AB.wav"
@@ -164,12 +188,32 @@ def fit_song(song: Song, sf: SoundFont, out_dir: Path, budget: str = "normal",
                 "cost_spectrum_db": round(c.cost.spectrum, 2),
                 "cost_envelope_db": round(c.cost.envelope, 2),
                 "wav": wav.name, "patch": c.patch.to_dict()})
+            if _patch_sig(entry["candidates"][-1]["patch"]) in refused:
+                entry["candidates"][-1]["rejected"] = True
         report["instruments"].append(entry)
         save()
         if res.candidates:
             best = min(res.candidates, key=lambda c: c.cost.total)
             progress(f"    pronto em {res.seconds:.0f}s; melhor custo {best.cost.total:.2f} ({best.stage})")
     return report
+
+
+def _patch_sig(p: dict) -> str:
+    """Assinatura do patch sem o nome (o nome muda com a posição: "Baixo #2")."""
+    return json.dumps({k: v for k, v in p.items() if k != "name"}, sort_keys=True)
+
+
+def reject(out_dir: Path, label: str, rank: int) -> dict:
+    """Marca o candidato como recusado pelo usuário (o rascunho automático o ignora)."""
+    path = out_dir / "patches.json"
+    rep = json.loads(path.read_text(encoding="utf-8"))
+    inst = next(e for e in rep["instruments"] if e["label"] == label)
+    cand = next(c for c in inst["candidates"] if c["rank"] == rank)
+    cand["rejected"] = True
+    sig = _patch_sig(cand["patch"])
+    inst["refused_patches"] = sorted(set(inst.get("refused_patches", [])) | {sig})
+    path.write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
+    return cand
 
 
 def report_text(report: dict) -> str:
@@ -192,7 +236,8 @@ def report_text(report: dict) -> str:
     return "\n".join(L)
 
 
-def approve(out_dir: Path, label: str, rank: int, sf: SoundFont, library_dir: Path) -> dict:
+def approve(out_dir: Path, label: str, rank: int, sf: SoundFont, library_dir: Path,
+            extra_source: dict | None = None) -> dict:
     """Marca o candidato escolhido pelo usuário como aprovado e o grava na biblioteca, com
     o perfil espectral médio do original (para sugerir este patch a instrumentos
     parecidos em outras músicas)."""
@@ -219,10 +264,15 @@ def approve(out_dir: Path, label: str, rank: int, sf: SoundFont, library_dir: Pa
         source={"sf2": getattr(sf, "path", None), "bank": inst["bank"], "program": inst["program"],
                 "preset": inst["preset"], "samples": sorted({v.sample.name for v in voices}),
                 "fit_label": label, "candidate": rank, "cost": cand["cost_total"],
-                "approved_at": __import__("datetime").datetime.now().isoformat(timespec="seconds")},
+                "approved_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+                **(extra_source or {})},
         profile=profile, tags=[inst["kind"]]))
     for c in inst["candidates"]:
         c["approved"] = c["rank"] == rank
+        if c["rank"] == rank:
+            c.pop("rejected", None)          # aprovar desfaz uma recusa anterior
+            inst["refused_patches"] = [s for s in inst.get("refused_patches", [])
+                                       if s != _patch_sig(c["patch"])]
     inst["approved_rank"] = rank
     inst["library_id"] = entry.id
     path.write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")

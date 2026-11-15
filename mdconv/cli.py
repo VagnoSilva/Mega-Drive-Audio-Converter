@@ -183,7 +183,9 @@ def cmd_preview(args) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="mdconv", description="Mega Drive Audio Converter")
+    from mdconv import __version__
+    ap = argparse.ArgumentParser(prog="mdconv", description=f"Mega Drive Audio Converter {__version__}")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("analyze", help="Analisa MIDI (e SF2, se informado)")

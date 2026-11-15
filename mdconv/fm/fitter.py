@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import differential_evolution
@@ -336,6 +337,92 @@ def fit_from_bank(bank, search_refs: list[RefNote], final_refs: list[RefNote] | 
         orig = Candidate(p, eval_patch(p, final_refs), tag)
         ref = Candidate(pp, eval_patch(pp, final_refs), tag + " + refino")
         out += [ref, orig]
+    out.sort(key=lambda c: c.cost.total)
+    chosen: list[Candidate] = []
+    for c in out:
+        if all(np.abs(c.patch.to_vector() - o.patch.to_vector()).sum() > 3 for o in chosen):
+            chosen.append(c)
+        if len(chosen) == n_results:
+            break
+    return chosen
+
+
+# ------------------------------------------------------------------ sugestões da biblioteca
+_PROFILE_CACHE: dict = {}
+
+
+def profile_of(audio: np.ndarray, sr: float, hz: float) -> np.ndarray:
+    """Perfil espectral médio (o mesmo que a aprovação grava em ``LibraryEntry.profile``):
+    faixas relativas à nota, ponderadas pelo envelope."""
+    from mdconv.fm.metrics import describe
+    d = describe(audio, sr, hz)
+    w = 10 ** (d.env_db / 20)
+    return (d.bands_db * w[:, None]).sum(0) / w.sum()
+
+
+def _entry_profile(e, hz: float) -> np.ndarray | None:
+    """Perfil gravado na aprovação; se não houver (ex.: patches vindos do extrator da CPS1),
+    usa o perfil do próprio patch tocado no emulador (em cache)."""
+    if e.profile:
+        return np.asarray(e.profile, dtype=float)
+    key = (e.id, json_key(e.patch), round(hz))
+    if key not in _PROFILE_CACHE:
+        try:
+            x = render_note(e.patch, hz, 0.5, sr_out=44100)
+            _PROFILE_CACHE[key] = profile_of(x, 44100, hz)
+        except Exception:
+            _PROFILE_CACHE[key] = None
+    return _PROFILE_CACHE[key]
+
+
+def json_key(patch: Patch) -> str:
+    import json
+    return json.dumps(patch.to_dict(), sort_keys=True)
+
+
+def fit_from_library(entries, search_refs: list[RefNote], final_refs: list[RefNote] | None = None,
+                     k: int = 8, n_polish: int = 2, n_results: int = 3, polish_evals: int = 400,
+                     max_fb: int = 7, carrier_min_mul: int = 0, mod_tl_min: int = 0,
+                     progress=lambda s: None) -> list[Candidate]:
+    """Candidatos a partir dos patches que o usuário JÁ APROVOU (em outras músicas ou
+    jogos) para sons parecidos — é assim que o conversor "aprende" com as escolhas feitas:
+    1. pré-seleção pelo perfil espectral (gravado na aprovação) contra o som original;
+    2. avaliação completa (mesma medida do ajuste) dos ``k`` mais parecidos;
+    3. os ``n_polish`` melhores entram como estão e também refinados a partir deles.
+    ``stage`` começa com "biblioteca:" e diz de qual patch veio."""
+    final_refs = final_refs or search_refs
+    if not entries or not search_refs:
+        return []
+    hz = search_refs[0].hz
+    ref = np.mean([profile_of(r.audio, r.sr, r.hz) for r in search_refs], 0)
+    pre = []
+    for e in entries:
+        if e.patch.fb > max_fb:
+            continue
+        prof = _entry_profile(e, hz)
+        if prof is None or len(prof) != len(ref):
+            continue
+        pre.append((float(np.mean(np.abs(prof - ref))), e))
+    pre.sort(key=lambda t: t[0])
+    progress(f"biblioteca: {len(pre)} patches aprovados comparados; avaliando os {min(k, len(pre))} mais parecidos")
+    scored, seen = [], set()
+    for _, e in pre[:k]:
+        p = normalize_carrier_level(e.patch)
+        sig = json_key(p)
+        if sig in seen or any(p.ops[i].mul < carrier_min_mul for i in p.carriers):
+            continue
+        seen.add(sig)
+        scored.append((eval_patch(p, search_refs).total, e, p))
+    scored.sort(key=lambda t: t[0])
+    out: list[Candidate] = []
+    for c0, e, p in scored[:n_polish]:
+        origem = e.source.get("game") or Path(str(e.source.get("sf2") or "")).stem
+        tag = f"biblioteca: {e.name}" + (f" ({origem})" if origem and origem not in e.name else "")
+        progress(f"refinando {e.name} (custo {c0:.2f})")
+        pp, _, _ = polish(p, search_refs, max_evals=polish_evals, max_fb=max_fb,
+                          carrier_min_mul=carrier_min_mul, mod_tl_min=mod_tl_min)
+        out += [Candidate(p, eval_patch(p, final_refs), tag),
+                Candidate(pp, eval_patch(pp, final_refs), tag + " + refino")]
     out.sort(key=lambda c: c.cost.total)
     chosen: list[Candidate] = []
     for c in out:

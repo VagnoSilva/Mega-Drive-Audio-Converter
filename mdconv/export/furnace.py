@@ -11,10 +11,12 @@ do XGM com a bateria em 2 canais) + "SN76489" (PSG da Sega). Sem PCM: "YM2612" (
 
 Tempo
 -----
-Cada linha do pattern vale ``g`` ticks do MIDI (24 por semínima no GBA). O Furnace roda a
-60 ticks por segundo (NTSC) com "virtual tempo" N/D = BPM/150 — o mesmo acumulador do
-driver do GBA —, então as notas caem no mesmo quadro em que o jogo as tocaria. ``g`` é o
-menor valor que respeita o limite do Furnace de uma linha por quadro (BPM ≤ 150·g). Notas
+Cada linha do pattern vale ``g`` ticks do MIDI. O Furnace roda a 60 ticks por segundo (NTSC)
+com "virtual tempo" N/D = BPM·PPQ/3600 — com 24 ticks por semínima (GBA) é BPM/150, o mesmo
+acumulador do driver do GBA —, então as notas caem no mesmo quadro em que o jogo as tocaria.
+Com outra resolução (ex.: 48 nos MIDIs da CPS1) o denominador vira 3600/PPQ (75), ou, se não
+for inteiro, D = 150 e N = BPM·PPQ/24. ``g`` é o menor valor que respeita o limite do Furnace
+de uma linha por quadro (N ≤ D·g). Notas
 que caem entre linhas recebem atraso EDxx (em quadros). Mudanças de andamento: FDxx.
 
 O que vira efeito
@@ -197,6 +199,11 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
         raise ValueError("a conversão não guardou a linha do tempo do driver")
     clk = _Clock(song)
     ppq = song.ppq
+    # virtual tempo: N/D = BPM·ppq/3600 (com ppq 24: BPM/150, como no driver do GBA)
+    if 3600 % ppq == 0:
+        vt_d, vt_scale = 3600 // ppq, 1.0
+    else:
+        vt_d, vt_scale = 150, ppq / 24.0
     use_pcm = bool(plan.pcm_channels)
     pcm_list = sorted(plan.pcm_channels)
     warnings: list[str] = []
@@ -239,7 +246,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     end_tick = loop.end_tick if loop is not None else max(
         clk.tick_at(len(stream.frames) / FPS), max(n.end_tick for n in song.notes))
     max_bpm = max([clk.bpm(t0)] + [c.bpm for c in clk.changes if t0 < c.tick < end_tick])
-    g = max(1, math.ceil(max_bpm / 150.0 - 1e-9))
+    g = max(1, math.ceil(max_bpm * vt_scale / vt_d - 1e-9))
     while ppq % g:
         g += 1
     rows_per_beat = ppq // g
@@ -260,7 +267,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
         """(linha, atraso em quadros) para um tick do MIDI."""
         off = tick - t0
         row, rem = divmod(off, g)
-        delay = int(round(rem * 150.0 / clk.bpm(tick))) if rem else 0
+        delay = int(round(rem * vt_d / (clk.bpm(tick) * vt_scale))) if rem else 0
         return row, delay
 
     def frame_of_tick(tick):
@@ -510,7 +517,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     # ---- notas que ainda soam no fim: corta ao final da última linha (como o XGM, que
     # desliga tudo no fim antes de voltar ao loop)
     last_row = n_rows - 1
-    frames_last = max(1, int(round(g * 150.0 / clk.bpm(t0 + last_row * g))))
+    frames_last = max(1, int(round(g * vt_d / (clk.bpm(t0 + last_row * g) * vt_scale))))
     for rec in events:
         if rec["typ"] == "pcm" or "row" not in rec or rec["row"] > last_row:
             continue
@@ -533,16 +540,16 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     for chg in clk.changes:
         if t0 < chg.tick < end_tick:
             r, _ = place(chg.tick)
-            N = int(round(chg.bpm))
-            if N > min(255, 150 * g):
-                N = min(255, 150 * g)
+            N = int(round(chg.bpm * vt_scale))
+            if N > min(255, vt_d * g):
+                N = min(255, vt_d * g)
                 rep.clamped_tempos += 1
             tempo_fx[r] = N
     for r, N in tempo_fx.items():
         cell(0, r).fx[EFF_VTEMPO_N] = N
-    vt_n = int(round(clk.bpm(t0)))
-    if vt_n > 150 * g:
-        vt_n = 150 * g
+    vt_n = int(round(clk.bpm(t0) * vt_scale))
+    if vt_n > vt_d * g:
+        vt_n = vt_d * g
         rep.clamped_tempos += 1
 
     # ---- padrões, ordens e loop
@@ -585,7 +592,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     rep.warnings = warnings
     meta = {"name": name or "", "author": author, "game": game, "g": g, "t0": t0,
             "rows_per_beat": rows_per_beat, "rows_per_bar": rows_per_bar, "pat_len": pat_len,
-            "vt_n": vt_n, "use_pcm": use_pcm, "n_ch": n_ch, "ch_names": ch_names}
+            "vt_n": vt_n, "vt_d": vt_d, "use_pcm": use_pcm, "n_ch": n_ch, "ch_names": ch_names}
     return meta, instruments, samples, cells, orders, rep
 
 
@@ -881,7 +888,7 @@ def serialize(meta, instruments, samples, cells, orders, compress: bool = True) 
     for v in (0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 4, 0, 0, 1, 1, 0, 0, 0, 0, 2, 0, 1, 0, 0, 0):
         w.c(v)
     w.s(meta["vt_n"])
-    w.s(150)
+    w.s(meta.get("vt_d", 150))
     w.string("")
     w.string("")
     w.c(0)

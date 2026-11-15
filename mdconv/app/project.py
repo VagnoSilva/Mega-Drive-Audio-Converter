@@ -60,6 +60,10 @@ class ProjectSettings:
     fm_engine: str = "auto"            # motor da prévia: auto (Nuked) | proprio | nuked
     title: str = ""
     game: str = ""
+    # Patches FM travados nesta música: "banco:programa" -> {"preset", "library_id",
+    # "approved_at", "patch"}. Têm prioridade sobre a biblioteca, então a música exporta
+    # sempre igual mesmo que a biblioteca mude; só são trocados quando o usuário pede.
+    pinned_patches: dict = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), ensure_ascii=False, indent=2)
@@ -110,6 +114,8 @@ class Candidate:
     cost: float
     summary: str
     approved: bool = False
+    rejected: bool = False
+    origin: str = ""
 
 
 @dataclass
@@ -125,6 +131,8 @@ class InstrumentRow:
     status: str                    # aprovado | provisório | bateria (PCM) | sem patch (PSG)
     library_id: str | None = None
     candidates: list[Candidate] = field(default_factory=list)
+    pinned: bool = False           # patch vem da trava do projeto (não da biblioteca)
+    auto: bool = False             # aprovado automaticamente (rascunho, ainda não ouvido)
     chip_use: dict[str, int] = field(default_factory=dict)   # canal do chip → nº de notas (última conversão)
 
     def chip_text(self) -> str:
@@ -266,11 +274,19 @@ class Project:
                 pool = "FM" if (p.pool == "FM" or p.overflow_psg) else p.pool
                 if pool not in r.pools:
                     r.pools.append(pool)
+        pins = self.settings.pinned_patches or {}
+        from mdconv.convert import apply_pinned
+        valid_pins = set(apply_pinned({}, pins, self.sf))
         for r in rows.values():
             r.channels.sort()
             e = approved.get(r.key)
-            if e is not None:
+            if r.key in valid_pins:
+                pin = pins[f"{r.key[0]}:{r.key[1]}"]
+                r.status, r.library_id, r.pinned = "aprovado", pin.get("library_id"), True
+                r.auto = bool(pin.get("auto"))
+            elif e is not None:
                 r.status, r.library_id = "aprovado", e.id
+                r.auto = bool(e.source.get("auto"))
             elif r.needs_fm:
                 r.status = "provisório"
             elif "PCM" in r.pools:
@@ -287,8 +303,8 @@ class Project:
         """Canais do chip em que o driver tocou cada instrumento, na última conversão (que
         ainda vale para as configurações atuais). O driver escolhe o canal nota a nota."""
         c = self._conversion
-        # o patch aprovado não muda a escolha de canais: ignora a biblioteca na comparação
-        if c is None or c.driver is None or self._conv_key is None or self._conv_key[:-1] != self._key()[:-1]:
+        # o patch aprovado não muda a escolha de canais: ignora biblioteca e travas na comparação
+        if c is None or c.driver is None or self._conv_key is None or self._conv_key[:-2] != self._key()[:-2]:
             return {}
         use: dict[tuple[int, int], dict[str, int]] = {}
         for ev in c.driver.timeline:
@@ -320,11 +336,12 @@ class Project:
                 for c in e["candidates"]:
                     p = c["patch"]
                     stage = c.get("stage", "")
-                    origin = stage if stage.startswith("banco") else "busca do zero"
+                    origin = stage if stage.startswith(("banco", "biblioteca")) else "busca do zero"
                     out.append(Candidate(
                         c["rank"], self.fit_dir / c["wav"], c["cost_total"],
                         f"{origin} · alg {p['alg']} · fb {p['fb']} · MUL {[o['mul'] for o in p['ops']]} · "
-                        f"custo {c['cost_total']:.2f}", bool(c.get("approved"))))
+                        f"custo {c['cost_total']:.2f}", bool(c.get("approved")),
+                        bool(c.get("rejected")), stage or origin))
                 return out
         return []
 
@@ -338,43 +355,201 @@ class Project:
             return None
         if getattr(self, "_bank", None) is None or self._bank_path != b:
             self._bank, self._bank_path = PatchBank(b), b
+        if len(self._bank) == 0:
+            return None                    # banco vazio (ex.: pasta sem .tfi) = sem banco
         return self._bank
 
     def fit(self, key: tuple[int, int], budget: str = "normal", max_fb: int = 5, detune: bool = False,
             progress: Progress = _quiet, use_bank: bool = True, bank_only: bool = False,
-            **fit_kw) -> list[Candidate]:
+            use_library: bool = True, **fit_kw) -> list[Candidate]:
         """Gera candidatos FM para um instrumento. Padrão FB ≤ 5: FB 6–7 deu chiado no fim
         das notas nos testes do song001."""
         from mdconv.fm.instrument_fit import fit_song
         self._need()
         bank = self.patch_bank() if use_bank else None
         if bank_only and bank is None:
-            raise ValueError("nenhum banco de patches prontos configurado")
+            raise ValueError("nenhum banco de patches prontos configurado (ou o banco está vazio: "
+                             "a pasta escolhida não tinha arquivos .tfi)")
         rep = fit_song(self.song, self.sf, self.fit_dir, budget=budget, progress=progress,
                        max_fb=max_fb, detune=detune, only={tuple(key)}, bank=bank,
-                       bank_only=bank_only, **fit_kw)
+                       bank_only=bank_only,
+                       library_dir=self.library_dir if use_library else None, **fit_kw)
         if not any((e["bank"], e["program"]) == tuple(key) for e in rep["instruments"]):
             raise ValueError(f"{key[0]}:{key[1]} não tem notas tonais para ajustar "
                              f"(kit de bateria ou sem preset no SF2)")
         return self.candidates(key)
 
-    def approve(self, key: tuple[int, int], rank: int) -> dict:
+    def approve(self, key: tuple[int, int], rank: int, auto: bool = False) -> dict:
         from mdconv.fm.instrument_fit import approve
         self._need()
         rep = self._fit_report()
         e = next((e for e in rep.get("instruments", []) if (e["bank"], e["program"]) == tuple(key)), None)
         if e is None:
             raise ValueError("gere os candidatos deste instrumento antes de aprovar")
-        r = approve(self.fit_dir, e["label"], rank, self.sf, self.library_dir)
+        r = approve(self.fit_dir, e["label"], rank, self.sf, self.library_dir,
+                    extra_source={"auto": True} if auto else None)
+        self._decision("rascunho_auto" if auto else "aprovado", key, rank)
+        # quem aprovou nesta música quer ouvir o patch novo nela: a trava desta música
+        # é atualizada (as outras músicas continuam com as travas delas)
+        k = f"{key[0]}:{key[1]}"
+        if k in (self.settings.pinned_patches or {}):
+            self._pin_from_library([tuple(key)])
         self.invalidate()
         return r
+
+    def auto_approve(self, budget: str = "quick", max_fb: int = 5, use_bank: bool = True,
+                     use_library: bool = True, progress: Progress = _quiet) -> list[str]:
+        """Rascunho para a música inteira: para cada instrumento FM ainda sem patch aprovado,
+        gera os candidatos e aprova o de menor custo, marcado como automático. Quem ouve e
+        aprova outro candidato depois substitui o rascunho (vale o aprovado mais recente)."""
+        self._need()
+        todo = [r for r in self.instruments() if r.needs_fm and r.status == "provisório"]
+        done = []
+        for i, r in enumerate(todo, 1):
+            progress(f"[{i}/{len(todo)}] {r.label}")
+            try:
+                cands = self.fit(r.key, budget=budget, max_fb=max_fb, progress=progress,
+                                 use_bank=use_bank, use_library=use_library)
+            except ValueError as e:
+                progress(f"    pulado: {e}")
+                continue
+            cands = [c for c in cands if not c.rejected]
+            if not cands:
+                continue
+            best = min(cands, key=lambda c: c.cost)
+            self.approve(r.key, best.rank, auto=True)
+            done.append(f"{r.label} → #{best.rank} ({best.summary.split(' · ')[0]}, custo {best.cost:.2f})")
+        return done
+
+    # ---------------------------------------------------------------- decisões do usuário
+    def reject(self, key: tuple[int, int], rank: int) -> None:
+        """O usuário ouviu e não gostou deste candidato."""
+        from mdconv.fm.instrument_fit import reject
+        e = self._fit_entry(key)
+        if e is None:
+            raise ValueError("gere os candidatos antes")
+        reject(self.fit_dir, e["label"], rank)
+        self._decision("recusado", key, rank)
+
+    def listened(self, key: tuple[int, int], rank: int) -> None:
+        """Registra que o candidato foi ouvido (dá peso às aprovações e recusas)."""
+        self._decision("ouviu", key, rank)
+
+    def _fit_entry(self, key):
+        for e in self._fit_report().get("instruments", []):
+            if (e["bank"], e["program"]) == tuple(key):
+                return e
+        return None
+
+    def _decision(self, event: str, key, rank: int | None = None) -> None:
+        """Grava a decisão com o contexto que permite aprender com ela depois."""
+        from mdconv.library.decisions import record
+        try:
+            e = self._fit_entry(key) or {}
+            cands = e.get("candidates", [])
+            c = next((x for x in cands if x["rank"] == rank), None)
+            roles = []
+            if self.plan is not None:
+                for p in self.plan.parts:
+                    if tuple(key) in [tuple(bp) for bp in p.programs]:
+                        roles.append(p.role)
+            def cand_info(x):
+                return {"rank": x["rank"], "origem": x.get("stage", ""), "custo": x.get("cost_total"),
+                        "custo_espectro": x.get("cost_spectrum_db"),
+                        "custo_envelope": x.get("cost_envelope_db"),
+                        "recusado": bool(x.get("rejected")), "aprovado": bool(x.get("approved"))}
+            record(event,
+                   musica=Path(self.settings.midi).name, sf2=Path(self.settings.sf2).name,
+                   instrumento={"banco": key[0], "programa": key[1], "preset": e.get("preset"),
+                                "tipo": e.get("kind"), "papeis": sorted(set(roles)),
+                                "notas": e.get("keys"), "velocity": e.get("velocity")},
+                   opcoes_busca=e.get("options", {}),
+                   candidato=({**cand_info(c), "patch": c.get("patch")} if c else None),
+                   alternativas=[cand_info(x) for x in cands if x is not c])
+        except Exception:
+            pass                               # o histórico nunca atrapalha o trabalho
+
+    # ---------------------------------------------------------------- patches travados
+    def _fm_keys(self) -> list[tuple[int, int]]:
+        """(banco, programa) dos instrumentos desta música que tocam no FM."""
+        self._need()
+        if self.plan is None:
+            self.replan()
+        keys = []
+        for p in self.plan.parts:
+            if p.pool == "FM" or p.overflow_psg:
+                for bp in p.programs:
+                    if bp not in keys:
+                        keys.append(bp)
+        return keys
+
+    def _pin_from_library(self, keys) -> list[str]:
+        from mdconv.convert import approved_entries, pin_key
+        approved = approved_entries(self.library_dir, self.sf)
+        pins = self.settings.pinned_patches
+        done = []
+        for key in keys:
+            e = approved.get(tuple(key))
+            if e is None:
+                continue
+            pins[pin_key(*key)] = {"preset": (e.source.get("preset") or e.name or "").strip(),
+                                   "library_id": e.id, "auto": bool(e.source.get("auto")),
+                                   "approved_at": e.source.get("approved_at", ""),
+                                   "patch": e.patch.to_dict()}
+            done.append(f"{key[0]}:{key[1]} {e.name}")
+        self.invalidate()
+        return done
+
+    def pin_patches(self) -> list[str]:
+        """Trava os patches aprovados que esta música usa e que ainda não estão travados.
+        Chamado ao salvar o projeto. Travas existentes nunca são trocadas aqui."""
+        from mdconv.convert import pin_key
+        pins = self.settings.pinned_patches
+        missing = [k for k in self._fm_keys() if pin_key(*k) not in pins]
+        return self._pin_from_library(missing)
+
+    def pin_differences(self) -> list[dict]:
+        """Instrumentos cujo patch na biblioteca é diferente do travado no projeto."""
+        from mdconv.convert import apply_pinned, approved_entries, pin_key
+        self._need()
+        approved = approved_entries(self.library_dir, self.sf)
+        pins = self.settings.pinned_patches or {}
+        valid = set(apply_pinned({}, pins, self.sf))
+        out = []
+        for key in self._fm_keys():
+            pin = pins.get(pin_key(*key))
+            e = approved.get(key)
+            if pin is None or key not in valid or e is None:
+                continue
+            if e.patch.to_dict() != pin["patch"]:
+                out.append({"key": key, "label": f"{key[0]}:{key[1]} {e.name}",
+                            "pinned_id": pin.get("library_id"), "pinned_at": pin.get("approved_at", ""),
+                            "library_id": e.id, "library_at": e.source.get("approved_at", "")})
+        return out
+
+    def update_pins(self, keys=None) -> list[str]:
+        """Troca as travas pelos patches atuais da biblioteca (todas as diferentes, ou ``keys``)."""
+        if keys is None:
+            keys = [d["key"] for d in self.pin_differences()]
+        return self._pin_from_library(keys)
+
+    def unpin(self, keys=None) -> None:
+        """Remove travas (todas, ou ``keys``): a música volta a seguir a biblioteca."""
+        from mdconv.convert import pin_key
+        if keys is None:
+            self.settings.pinned_patches = {}
+        else:
+            for k in keys:
+                self.settings.pinned_patches.pop(pin_key(*k), None)
+        self.invalidate()
 
     # ---------------------------------------------------------------- conversão
     def _key(self):
         s = self.settings
         return (tuple(s.pcm_channels), s.use_pcm, s.vibrato, s.noise_metals, s.fm_alloc, s.snap_tempo,
                 s.fm_att_db, s.loop_mode,
-                s.loop_start_tick, s.loop_end_tick, self._library_stamp())
+                s.loop_start_tick, s.loop_end_tick, self._library_stamp(),
+                json.dumps(s.pinned_patches or {}, sort_keys=True))
 
     def _library_stamp(self):
         d = self.library_dir
@@ -395,7 +570,8 @@ class Project:
                     balance="manual" if s.fm_att_db is not None else "auto",
                     fm_att_db=s.fm_att_db or 0.0, loop_mode=s.loop_mode,
                     loop_start_tick=s.loop_start_tick, loop_end_tick=s.loop_end_tick,
-                    noise_metals=s.noise_metals, fm_alloc=s.fm_alloc, snap_tempo=s.snap_tempo)
+                    noise_metals=s.noise_metals, fm_alloc=s.fm_alloc, snap_tempo=s.snap_tempo,
+                    pinned=s.pinned_patches)
         self.plan = c.plan
         self._conversion, self._conv_key = c, key
         return c
@@ -457,7 +633,11 @@ class Project:
         lines = export_and_validate(c.stream, self.out_dir, self.stem, set(self.settings.formats),
                                     title=self.settings.title or self.stem, game=self.settings.game,
                                     wav=wav, fm_engine=self.settings.fm_engine, conversion=c)
-        provisional = [r.label for r in self.instruments() if r.status == "provisório"]
+        rows = self.instruments()
+        provisional = [r.label for r in rows if r.status == "provisório"]
+        n_pin = sum(1 for r in rows if r.pinned)
+        n_lib = sum(1 for r in rows if r.status == "aprovado" and not r.pinned)
+        lines.append(f"patches FM: {n_pin} travado(s) no projeto, {n_lib} da biblioteca")
         if provisional:
             lines.append("⚠ com patch provisório (ainda sem aprovação): " + ", ".join(provisional))
         lp = c.loop

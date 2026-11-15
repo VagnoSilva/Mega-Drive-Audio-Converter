@@ -102,6 +102,8 @@ class PatchBank:
                 w_env: float = 0.5, max_fb: int = 7) -> list[Match]:
         """Os ``k`` patches mais próximos. Cada um é testado também em outras oitavas
         (``Patch.octave``): deslocar a altura é deslocar o perfil 6 faixas por oitava."""
+        if len(self) == 0 or self.profiles.ndim != 2 or len(self.profiles) == 0:
+            return []                      # banco vazio (pasta sem .tfi): nada a sugerir
         P = self.profiles
         best = np.full(len(P), np.inf, np.float32)
         best_oct = np.zeros(len(P), np.int8)

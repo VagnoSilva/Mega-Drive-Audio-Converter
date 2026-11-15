@@ -1,0 +1,384 @@
+{
+ "_info": "Tabela de jogos CPS1 derivada do mame_roms.json do VGMTrans (licenca zlib, https://github.com/vgmtrans/vgmtrans).",
+ "games": [
+  {
+   "name": "1941",
+   "version": "2.00",
+   "tables": "0x1000",
+   "audio_roms": [
+    "41_9.12b"
+   ],
+   "oki_roms": [
+    "41_18.11c",
+    "41_19.12c"
+   ]
+  },
+  {
+   "name": "3wonders",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "rt_9.12b"
+   ],
+   "oki_roms": [
+    "rt_18.11c",
+    "rt_19.12c"
+   ]
+  },
+  {
+   "name": "cawing",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "ca_9.12b"
+   ],
+   "oki_roms": [
+    "ca_18.11c",
+    "ca_19.12c"
+   ]
+  },
+  {
+   "name": "captcomm",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "cc_09.11a"
+   ],
+   "oki_roms": [
+    "cc_18.11c",
+    "cc_19.12c"
+   ]
+  },
+  {
+   "name": "cworld2j",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "q5_23.13b"
+   ],
+   "oki_roms": [
+    "q5_30.12c",
+    "q5_31.13c"
+   ]
+  },
+  {
+   "name": "dynwar",
+   "version": "1.00",
+   "tables": "0xE57",
+   "audio_roms": [
+    "tke_17.12b"
+   ],
+   "oki_roms": [
+    "tke_18.11c",
+    "tke_19.12c"
+   ]
+  },
+  {
+   "name": "ffight",
+   "version": "2.00",
+   "tables": "0x1000",
+   "audio_roms": [
+    "ff_09.12b"
+   ],
+   "oki_roms": [
+    "ff_18.11c",
+    "ff_19.12c"
+   ]
+  },
+  {
+   "name": "forgottn",
+   "version": "1.00",
+   "tables": "0xDD0",
+   "audio_roms": [
+    "lw_37.13c"
+   ],
+   "oki_roms": [
+    "lw-03u.12e",
+    "lw-04u.13e"
+   ]
+  },
+  {
+   "name": "ghouls",
+   "version": "1.00",
+   "tables": "0xDF0",
+   "audio_roms": [
+    "26.10a"
+   ],
+   "oki_roms": []
+  },
+  {
+   "name": "ganbare",
+   "version": "5.00",
+   "tables": "0xFFE",
+   "audio_roms": [
+    "mrnj_09.12a"
+   ],
+   "oki_roms": [
+    "mrnj_18.11c",
+    "mrnj_19.12c"
+   ]
+  },
+  {
+   "name": "gulunpa",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "9"
+   ],
+   "oki_roms": [
+    "18",
+    "19"
+   ]
+  },
+  {
+   "name": "kenseim",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "knm_09.12a"
+   ],
+   "oki_roms": [
+    "knm_18.11c",
+    "knm_19.12c"
+   ]
+  },
+  {
+   "name": "knights",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "kr_09.11a"
+   ],
+   "oki_roms": [
+    "kr_18.11c",
+    "kr_19.12c"
+   ]
+  },
+  {
+   "name": "kod",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "kd_9.12a"
+   ],
+   "oki_roms": [
+    "kd_18.11c",
+    "kd_19.12c"
+   ]
+  },
+  {
+   "name": "megaman",
+   "version": "5.02",
+   "tables": "0xFFE",
+   "audio_roms": [
+    "rcm_09.11a"
+   ],
+   "oki_roms": [
+    "rcm_18.11c",
+    "rcm_19.12c"
+   ]
+  },
+  {
+   "name": "mercs",
+   "version": "3.50",
+   "tables": "0x1000",
+   "audio_roms": [
+    "so2_09.12b"
+   ],
+   "oki_roms": [
+    "so2_18.11c",
+    "so2_19.12c"
+   ]
+  },
+  {
+   "name": "mpumpkin",
+   "version": "5.00",
+   "tables": "0xFFE",
+   "audio_roms": [
+    "mpa_09.12a"
+   ],
+   "oki_roms": [
+    "mpa_18.11c",
+    "mpa_19.12c"
+   ]
+  },
+  {
+   "name": "msword",
+   "version": "3.50",
+   "tables": "0x1000",
+   "audio_roms": [
+    "ms_09.12b"
+   ],
+   "oki_roms": [
+    "ms_18.11c",
+    "ms_19.12c"
+   ]
+  },
+  {
+   "name": "mtwins",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "ch_09.12b"
+   ],
+   "oki_roms": [
+    "ch_18.11c",
+    "ch_19.12c"
+   ]
+  },
+  {
+   "name": "nemo",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "nme_09.12b"
+   ],
+   "oki_roms": [
+    "nme_18.11c",
+    "nme_19.12c"
+   ]
+  },
+  {
+   "name": "pang3",
+   "version": "5.00",
+   "tables": "0xFFE",
+   "audio_roms": [
+    "pa3_11.11f"
+   ],
+   "oki_roms": [
+    "pa3_05.10d",
+    "pa3_06.11d"
+   ]
+  },
+  {
+   "name": "pnickj",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "pnij_17.13b"
+   ],
+   "oki_roms": [
+    "pnij_24.12c",
+    "pnij_25.13c"
+   ]
+  },
+  {
+   "name": "pokonyan",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "xmqq-13b.bin"
+   ],
+   "oki_roms": [
+    "xmqq-12c.bin"
+   ]
+  },
+  {
+   "name": "qad",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "qd_23.13b"
+   ],
+   "oki_roms": [
+    "qdu_30.12c",
+    "qdu_31.13c"
+   ]
+  },
+  {
+   "name": "qtono2j",
+   "version": "5.00",
+   "tables": "0xFFE",
+   "audio_roms": [
+    "tn2j_09.12a"
+   ],
+   "oki_roms": [
+    "tn2j_18.11c",
+    "tn2j_19.12c"
+   ]
+  },
+  {
+   "name": "sf2",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "sf2_9.12a"
+   ],
+   "oki_roms": [
+    "sf2_18.11c",
+    "sf2_19.12c"
+   ]
+  },
+  {
+   "name": "sf2ce",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "s92_09.11a"
+   ],
+   "oki_roms": [
+    "s92_18.11c",
+    "s92_19.12c"
+   ]
+  },
+  {
+   "name": "sf2hf",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "s92_09.11a"
+   ],
+   "oki_roms": [
+    "s92_18.11c",
+    "s92_19.12c"
+   ]
+  },
+  {
+   "name": "strider",
+   "version": "1.00",
+   "tables": "0xDCD",
+   "audio_roms": [
+    "09.12b"
+   ],
+   "oki_roms": [
+    "18.11c",
+    "19.12c"
+   ]
+  },
+  {
+   "name": "unsquad",
+   "version": "1.00",
+   "tables": "0xE57",
+   "audio_roms": [
+    "ar_09.12b"
+   ],
+   "oki_roms": [
+    "aru_18.11c"
+   ]
+  },
+  {
+   "name": "varth",
+   "version": "4.25",
+   "tables": "0x1100",
+   "audio_roms": [
+    "va_09.12b"
+   ],
+   "oki_roms": [
+    "va_18.11c",
+    "va_19.12c"
+   ]
+  },
+  {
+   "name": "willow",
+   "version": "1.00",
+   "tables": "0xe6d",
+   "audio_roms": [
+    "wl_09.12b"
+   ],
+   "oki_roms": [
+    "wl_18.11c",
+    "wl_19.12c"
+   ]
+  }
+ ]
+}

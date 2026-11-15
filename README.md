@@ -1,5 +1,8 @@
 # Mega Drive Audio Converter — versão 0.10.0
 
+
+https://www.youtube.com/watch?v=7D0I-a21h58
+
 Conversor de músicas (MIDI + SoundFont) para o som do Mega Drive (YM2612 + SN76489 + PCM),
 com exportação XGM v1 (SGDK), VGM e Furnace.
 
@@ -330,3 +333,6 @@ Não publique só o `.exe` da pasta `dist\MegaDriveAudioConverter`: ele depende 
 mandar o executável pelo próprio repositório (git) — use os Releases.
 
 Requisitos de quem usa: Windows 10 ou 11, 64 bits (o Python 3.14 não roda em Windows 7/8).
+
+
+

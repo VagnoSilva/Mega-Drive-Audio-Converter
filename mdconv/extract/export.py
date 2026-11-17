@@ -1,4 +1,4 @@
-"""Fluxo completo: ROM -> MIDI + SoundFont + samples WAV + banco .opm."""
+"""Fluxo completo: ROM -> MIDI + SoundFont + samples WAV + biblioteca de patches do Mega Drive."""
 import math
 import os
 import struct
@@ -79,15 +79,6 @@ def export_oki_wavs(gd, out_dir, log=None):
     _log(log, f"  {len(gd.oki_samples)} samples do Oki salvos em WAV")
 
 
-def export_opm(gd, path):
-    with open(path, "w", encoding="latin-1", newline="\r\n") as f:
-        f.write(f"//MiOPMdrv sound bank Paramer Ver2002.04.22\n//{gd.name} - CPS1 YM2151\n")
-        f.write("//LFO: LFRQ AMD PMD WF NFRQ\n//@:[Num] [Name]\n//CH: PAN FL CON AMS PMS SLOT NE\n")
-        f.write("//[OPname]: AR D1R D2R RR D1L TL KS MUL DT1 DT2 AMS-EN\n\n")
-        for ins in gd.driver.instruments:
-            f.write(ins.to_opm(ins.index) + "\n")
-
-
 def build_soundfont(gd, path, quality="full", log=None, progress=None):
     from . import ym2151   # numpy só é necessário aqui
     sf = sf2.SoundFont(f"{gd.name} (CPS1)")
@@ -158,7 +149,7 @@ def build_soundfont(gd, path, quality="full", log=None, progress=None):
     _log(log, f"  SoundFont salvo: {os.path.basename(path)} ({os.path.getsize(path) / 1e6:.1f} MB)")
 
 
-def export_all(gd, out_dir, plays=2, do_midi=True, do_sf2=True, do_wav=True, do_opm=True,
+def export_all(gd, out_dir, plays=2, do_midi=True, do_sf2=True, do_wav=True,
                quality="full", song_ids=None, log=None, progress=None, do_mdlib=True):
     if getattr(gd, "format", "CPS1") == "GBA":
         from . import gba
@@ -175,10 +166,6 @@ def export_all(gd, out_dir, plays=2, do_midi=True, do_sf2=True, do_wav=True, do_
         _log(log, "Gerando MIDIs...")
         export_midis(gd, os.path.join(base, "midi"), song_ids, plays, log,
                      (lambda a, b: progress("MIDI", a, b)) if progress else None)
-    if do_opm and d.instruments:
-        p = os.path.join(base, f"{gd.name}.opm")
-        export_opm(gd, p)
-        _log(log, f"Banco de timbres FM (VOPM) salvo: {os.path.basename(p)}")
     if do_mdlib and d.instruments:
         _log(log, "Gerando biblioteca de patches para o Mega Drive Audio Converter...")
         mdlib.write_library(gd, os.path.join(base, "biblioteca_megadrive"),

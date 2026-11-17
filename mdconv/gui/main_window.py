@@ -159,13 +159,14 @@ class MainWindow(QMainWindow):
         h.triggered.connect(self.show_decisions)
         m.addAction(h)
         m.addSeparator()
-        t = QAction("Montar banco de patches .tfi…", self)
-        t.triggered.connect(self.build_tfi_bank)
-        m.addAction(t)
-        m.addSeparator()
         q = QAction("Sair", self)
         q.triggered.connect(self.close)
         m.addAction(q)
+        f = self.menuBar().addMenu("&Ferramentas")
+        a = QAction("Conversores e efeitos (VGM, efeitos de chip, WAV, banco .tfi)…", self)
+        a.setShortcut("Ctrl+T")
+        a.triggered.connect(lambda: self.open_tools())
+        f.addAction(a)
         h = self.menuBar().addMenu("A&juda")
         a = QAction("Sobre", self)
         a.triggered.connect(self.about)
@@ -310,6 +311,10 @@ class MainWindow(QMainWindow):
             "Ajusta o andamento para o passo rítmico durar um número inteiro de quadros, como um\n"
             "músico faria no tracker. Ex.: 102 → 100 BPM deixa a semicolcheia em 6 quadros exatos\n"
             "em vez de alternar 6 e 5.")
+        self.ck_trim = QCheckBox("Começar na primeira nota (tira o silêncio do início da música)")
+        self.ck_trim.setToolTip(
+            "Os MIDIs extraídos costumam começar com um trecho mudo (o GBA Mus Ripper põe um\n"
+            "compasso inteiro). Marcado, a música começa direto na primeira nota; o loop acompanha.")
         self.ck_noise = QCheckBox("Chimbais e pratos no ruído do PSG (libera o PCM para bumbo e caixa)")
         self.ck_noise.setToolTip(
             "Peças metálicas do kit (detectadas pelo som: agudas e sem grave) tocam no canal de\n"
@@ -332,6 +337,7 @@ class MainWindow(QMainWindow):
         fl.addRow("Canais PCM da música:", pcm_row)
         fl.addRow("Canais FM:", self.cb_alloc)
         fl.addRow(self.ck_grid)
+        fl.addRow(self.ck_trim)
         fl.addRow(self.ck_noise)
         fl.addRow(self.ck_vibrato)
         fl.addRow("Equilíbrio bateria × resto:", bal)
@@ -478,6 +484,7 @@ class MainWindow(QMainWindow):
         self.ck_noise.setChecked(s.noise_metals)
         self.cb_alloc.setCurrentIndex(max(0, self.cb_alloc.findData(s.fm_alloc)))
         self.ck_grid.setChecked(s.snap_tempo)
+        self.ck_trim.setChecked(s.trim_start)
         self.ck_auto_bal.setChecked(s.fm_att_db is None)
         self.sp_att.setValue(s.fm_att_db or 0.0)
         self.sp_att.setEnabled(s.fm_att_db is not None)
@@ -504,6 +511,7 @@ class MainWindow(QMainWindow):
         s.noise_metals = self.ck_noise.isChecked()
         s.fm_alloc = self.cb_alloc.currentData()
         s.snap_tempo = self.ck_grid.isChecked()
+        s.trim_start = self.ck_trim.isChecked()
         s.fm_att_db = None if self.ck_auto_bal.isChecked() else float(self.sp_att.value())
         s.loop_mode = self.cb_loop.currentData()
         s.formats = [f for f, ck in (("xgm", self.ck_xgm), ("vgm", self.ck_vgm), ("fur", self.ck_fur))
@@ -523,7 +531,7 @@ class MainWindow(QMainWindow):
     def _run(self, title: str, fn, on_done, *args, **kwargs):
         if self.task is not None:
             QMessageBox.information(self, APP_NAME, "Aguarde a tarefa atual terminar (ou cancele).")
-            return
+            return False
         self.task = Task(fn, *args, **kwargs)
         self._on_done = on_done
         self.task.signals.progress.connect(self._task_progress)
@@ -532,6 +540,7 @@ class MainWindow(QMainWindow):
         self._log(f"▶ {title}")
         self._set_busy(True)
         self.pool.start(self.task)
+        return True
 
     def _task_progress(self, msg: str):
         self._log(msg)
@@ -688,6 +697,9 @@ class MainWindow(QMainWindow):
         self._show_loop(loop)
         self._set_loaded(True)
         self._set_busy(False)
+        if project.trim_seconds > 0:
+            self._log(f"Silêncio do início removido: {project.trim_seconds:.2f} s "
+                      "(a música começa na primeira nota).")
         n_prov = sum(1 for r in rows if r.status == "provisório")
         n_pin = sum(1 for r in rows if r.pinned)
         self._log(f"✔ {len(rows)} instrumentos; {n_prov} ainda sem patch FM aprovado"
@@ -969,6 +981,10 @@ class MainWindow(QMainWindow):
     def _after_replan(self, result):
         rows, report, c = result
         self._fill_instruments(rows)
+        if self.project:
+            self.sp_bar.setRange(1, self.project.bar_count())
+            if self.project.trim_seconds > 0:
+                self._log(f"Silêncio do início removido: {self.project.trim_seconds:.2f} s.")
         self.tx_plan.setPlainText(report)
         if c.balance:
             self._log(f"Equilíbrio automático: FM/PSG −{c.balance['fm_psg_att_db']} dB.")
@@ -1069,16 +1085,19 @@ class MainWindow(QMainWindow):
             self.player.stop()
             self.player.setSource(QUrl())
 
-    # ------------------------------------------------------------- banco .tfi
-    def build_tfi_bank(self):
-        src = QFileDialog.getExistingDirectory(self, "Pasta com os arquivos .tfi (subpastas incluídas)",
-                                               str(Path.home()))
-        if not src:
-            return
-        dst = QFileDialog.getExistingDirectory(self, "Pasta onde gravar o banco (de preferência vazia)",
-                                               str(Path(self.ed_library.text() or Path.home()).parent))
-        if not dst:
-            return
+    # ------------------------------------------------------------- ferramentas (subtela)
+    def open_tools(self, tab: int | None = None):
+        """Subtela com os conversores à parte (VGM direto, efeitos de chip, WAV, banco .tfi)."""
+        from mdconv.gui.tools_dialog import ToolsDialog
+        if getattr(self, "_tools", None) is None:
+            self._tools = ToolsDialog(self)
+        if tab is not None:
+            self._tools.tabs.setCurrentIndex(tab)
+        self._tools.show()
+        self._tools.raise_()
+        self._tools.activateWindow()
+
+    def build_tfi_bank_job(self, src: str, dst: str, on_done=None):
         from mdconv.library.bank import build_bank
         workers = max(1, (os.cpu_count() or 2) - 1)
 
@@ -1092,9 +1111,94 @@ class MainWindow(QMainWindow):
                    f"({s['n_errors']} com defeito; {s['ssg_eg_ignored']} usam SSG-EG, importados sem ele). "
                    f"Ordem dos operadores conferida em {o['alg4']} patches de algoritmo 4.")
             self._log("✔ " + msg)
+            if on_done:
+                on_done()
             QMessageBox.information(self, APP_NAME, msg + "\n\nO campo 'Banco de patches prontos' já aponta "
                                     "para ele.")
-        self._run("Montando o banco de patches .tfi (milhares de patches levam alguns minutos)", work, done)
+        return self._run("Montando o banco de patches .tfi (milhares de patches levam alguns minutos)",
+                         work, done)
+
+    def convert_vgm_job(self, files, dst, grid=False, trim=True, routing=None, on_done=None):
+        """VGM de AY-3-8910 (Moon Patrol, MSX…) ou YM2203 (Ghosts 'n Goblins…): conversão direta,
+        chip a chip, para XGM/VGM. ``routing``: rotas manuais dos canais do AY."""
+        from mdconv.vgmconv import convert_file
+
+        def work(progress):
+            out, bad = [], 0
+            for f in files:
+                progress(f"▶ {Path(f).name}")
+                try:
+                    out += convert_file(f, dst, grid=grid, trim=trim, routing=routing, log=progress)
+                except Exception as exc:              # um arquivo ruim não para o lote
+                    bad += 1
+                    progress(f"✖ {Path(f).name}: {exc}")
+            return out, bad
+
+        def done(result):
+            paths, bad = result
+            self._log(f"✔ {len(files) - bad} música(s) convertida(s) em {dst}"
+                      + (f"; {bad} com erro (ver registro)" if bad else ""))
+            if on_done:
+                on_done()
+            QMessageBox.information(self, APP_NAME, f"Pronto: {len(paths)} arquivo(s) em\n{dst}"
+                                    + (f"\n\n{bad} arquivo(s) com erro: veja o registro." if bad else ""))
+
+        self.main_tabs.setCurrentIndex(1)
+        return self._run(f"Convertendo {len(files)} VGM", work, done)
+
+    def _chip_sfx_job(self, title, items, dst, game="", on_done=None):
+        """items: lista de (nome, função que devolve o AyVgm[, (canais PSG, canais FM)]).
+        Canais 0–2 = PSG tons 1–3; 0–5 = FM 1–6."""
+        from mdconv import chipsfx
+
+        def work(progress):
+            out = []
+            for item in items:
+                name, get = item[0], item[1]
+                psg, fm = item[2] if len(item) > 2 else (chipsfx.DEFAULT_PSG, chipsfx.DEFAULT_FM)
+                try:
+                    sfx = chipsfx.from_ay(get(), name, psg_free=psg, fm_free=fm)
+                    out += chipsfx.write_outputs(sfx, dst, game=game)
+                    progress(f"✔ {name}: {len(sfx.frames)} quadros, {sfx.n_writes} escritas")
+                    for line in sfx.report:
+                        progress("   " + line)
+                except Exception as exc:              # um efeito ruim não para o lote
+                    progress(f"✖ {name}: {exc}")
+            return out
+
+        def done(paths):
+            self._log(f"✔ Efeitos prontos em {dst}: .vgm, .c (SGDK) e prévia de cada um")
+            if on_done:
+                on_done()
+            QMessageBox.information(self, APP_NAME, f"Pronto: {len(paths)} arquivo(s) em\n{dst}\n\n"
+                                    "No jogo: chame nome_play() para disparar e nome_update() uma vez por quadro.")
+
+        self.main_tabs.setCurrentIndex(1)
+        return self._run(title, work, done)
+
+    def chip_sfx_files_job(self, files, dst, psg_free, fm_free, on_done=None):
+        from mdconv.ay.convert import read_vgm
+        items = [(Path(f).stem, (lambda f=f: read_vgm(f)), (tuple(psg_free), tuple(fm_free))) for f in files]
+        return self._chip_sfx_job(f"Convertendo {len(files)} efeito(s) de chip", items, dst, on_done=on_done)
+
+    def wav_sfx_job(self, files, dst, rate=14000, compress=True, same_gain=False, on_done=None):
+        """WAV de efeitos/vozes → PCM de 8 bits na taxa do driver, sem o som "rouco"."""
+        from mdconv.sfx import convert_batch
+
+        def work(progress):
+            return convert_batch(files, dst, rate=rate, compress=compress, same_gain=same_gain, log=progress)
+
+        def done(results):
+            kb = sum(r.rom_bytes for r in results) / 1024
+            self._log(f"✔ {len(results)} efeito(s) prontos em {dst} ({kb:.0f} KB na ROM). "
+                      "No .res: WAV nome \"arquivo.wav\" XGM")
+            if on_done:
+                on_done()
+            QMessageBox.information(self, APP_NAME, f"Pronto: {len(results)} arquivo(s) em\n{dst}\n\n"
+                                    f"{kb:.0f} KB na ROM. Prévias para ouvir no PC na subpasta 'previa'.")
+
+        self.main_tabs.setCurrentIndex(1)
+        return self._run(f"Preparando {len(files)} efeito(s) sonoro(s)", work, done)
 
     # ------------------------------------------------------------- outros
     def about(self):
@@ -1107,6 +1211,8 @@ class MainWindow(QMainWindow):
                           "ou do GBA Mus Ripper"
                           "<br>• Arcades Capcom <b>CPS1</b> — MIDI + SF2 da aba Extração, com os timbres "
                           "FM originais prontos como biblioteca de patches."
+                          "<br>• VGM de <b>AY-3-8910</b> (Moon Patrol, MSX, Spectrum…) e <b>YM2203</b> "
+                          "(Ghosts 'n Goblins…) — conversão direta chip a chip (menu Ferramentas)."
                           f"<br><br>Aba <b>Extração</b>: extrator de áudio {extract_version} "
                           "(parte CPS1 portada do VGMTrans, licença zlib)."
                           "<br><br>Software livre."

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from mdconv.driver.driver import Stream
-from mdconv.export.common import export_frames
+from mdconv.export.common import export_frames, loop_prefix
 
 ALIGN = 256
 MAX_SAMPLES = 63
@@ -133,9 +133,12 @@ def write_xgm(stream: Stream, path, pal: bool = False) -> XgmInfo:
     filtered = 0
     loop_ofs = None
     last = len(frames) - 1
+    pre = loop_prefix(stream, frames, loop_frame)
     for f, ws in enumerate(frames):
         if f == loop_frame:
+            filtered += _encode_frame(ws[:pre], music)
             loop_ofs = len(music)
+            ws = ws[pre:]
         filtered += _encode_frame(ws, music)
         if f == last and loop_ofs is not None:
             # O driver Z80 (drv_xgm.s80, com_loop) salta para o loop e encerra o quadro

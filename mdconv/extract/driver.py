@@ -35,7 +35,8 @@ def s16(v):
 # Instrumentos FM (YM2151 / OPM)
 # ----------------------------------------------------------------------------------------
 class OPMInstrument:
-    """Parâmetros no formato do VOPM. Operadores na ordem dos registradores: M1, M2, C1, C2."""
+    """Timbre FM do YM2151 (nomes de parâmetros do VOPM). Operadores na ordem dos registradores:
+    M1, M2, C1, C2."""
 
     def __init__(self, index):
         self.index = index
@@ -45,16 +46,6 @@ class OPMInstrument:
         self.ch = dict(PAN=0xC0, FL=0, CON=0, AMS=0, PMS=0, SLOT_MASK=0x78, NE=0)
         self.op = [dict(AR=31, D1R=0, D2R=0, RR=15, D1L=0, TL=0, KS=0, MUL=1, DT1=0, DT2=0, AMS_EN=0)
                    for _ in range(4)]
-
-    def to_opm(self, num):
-        lines = [f"@:{num} {self.name}",
-                 "LFO:{LFRQ} {AMD} {PMD} {WF} {NFRQ}".format(**self.lfo),
-                 "CH: {PAN} {FL} {CON} {AMS} {PMS} {SLOT_MASK} {NE}".format(**self.ch)]
-        for idx, name in ((0, "M1"), (2, "C1"), (1, "M2"), (3, "C2")):
-            o = self.op[idx]
-            lines.append(f"{name}: {o['AR']} {o['D1R']} {o['D2R']} {o['RR']} {o['D1L']} {o['TL']} "
-                         f"{o['KS']} {o['MUL']} {o['DT1']} {o['DT2']} {o['AMS_EN']}")
-        return "\n".join(lines) + "\n"
 
 
 _CON_LIMITS = (7, 5, 4, 0)   # operador i é portadora quando CON >= limite

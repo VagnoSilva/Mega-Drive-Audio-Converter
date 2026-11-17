@@ -4,15 +4,17 @@ Funciona sozinha, como o extrator independente. O botão "Abrir na conversão" l
 escolhida (MIDI + SF2 + biblioteca, quando houver) para a aba "Conversão"."""
 from __future__ import annotations
 
+import glob
 import os
 import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QRadioButton, QSpinBox, QSplitter, QVBoxLayout, QWidget,
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit,
+    QProgressBar, QPushButton, QRadioButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -95,7 +97,8 @@ class ExtractTab(QWidget):
         self.bt_load = QPushButton("Carregar")
         self.bt_load.clicked.connect(self.load)
         r2.addWidget(self.bt_load)
-        self.lb_info = QLabel(f"{self.cb_game.count() - 1} jogos CPS1 + jogos de GBA com o motor de som da Nintendo")
+        self.lb_info = QLabel(f"{self.cb_game.count() - 1} jogos CPS1 + jogos de GBA com o motor de som da Nintendo"
+                              " + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98), direto para o Mega Drive")
         self.lb_info.setStyleSheet("color: #888; margin-left: 12px")
         r2.addWidget(self.lb_info, 1)
         l1.addLayout(r2)
@@ -124,9 +127,8 @@ class ExtractTab(QWidget):
         self.ck_midi = QCheckBox("MIDI das músicas")
         self.ck_sf2 = QCheckBox("SoundFont (.sf2)")
         self.ck_wav = QCheckBox("Samples do Oki (.wav) — CPS1")
-        self.ck_opm = QCheckBox("Timbres FM (.opm / VOPM) — CPS1")
         self.ck_lib = QCheckBox("Biblioteca de patches FM — CPS1")
-        for c in (self.ck_midi, self.ck_sf2, self.ck_wav, self.ck_opm, self.ck_lib):
+        for c in (self.ck_midi, self.ck_sf2, self.ck_wav, self.ck_lib):
             c.setChecked(True)
             l3.addWidget(c)
         l3.addWidget(QLabel("Qualidade do SF2 (CPS1):"))
@@ -146,7 +148,19 @@ class ExtractTab(QWidget):
         hp.addWidget(self.sp_plays)
         hp.addStretch(1)
         l3.addLayout(hp)
-        self._cps1_only = [self.ck_wav, self.ck_opm, self.ck_lib, self.rb_full, self.rb_quick, self.sp_plays]
+        self._cps1_only = [self.ck_wav, self.ck_lib, self.rb_full, self.rb_quick, self.sp_plays]
+        self.bt_sfx_ch = QPushButton("Canais dos efeitos…")
+        self.bt_sfx_ch.setToolTip("Escolhe em quais canais do PSG e do FM cada efeito de chip toca, para "
+                                  "efeitos que soam juntos no jogo não brigarem pelo mesmo canal.")
+        self.bt_sfx_ch.clicked.connect(self.edit_sfx_channels)
+        self.bt_sfx_ch.setEnabled(False)
+        l3.addWidget(self.bt_sfx_ch)
+        self.bt_neo = QPushButton("Opções do Neo Geo…")
+        self.bt_neo.setToolTip("Canais PCM da música, peças metálicas no ruído do PSG e tamanho das amostras "
+                               "(o que mais pesa na ROM).")
+        self.bt_neo.clicked.connect(self.edit_neo_options)
+        self.bt_neo.setEnabled(False)
+        l3.addWidget(self.bt_neo)
         right.addWidget(g3)
 
         g4 = QGroupBox("4. Pasta de saída")
@@ -238,7 +252,7 @@ class ExtractTab(QWidget):
 
     def _set_rom(self, p):
         self.ed_rom.setText(p)
-        if extract.is_gba(p):
+        if extract.is_gba(p) or extract.is_direct(p):
             self.cb_game.setCurrentIndex(0)
             self.load()
             return
@@ -261,18 +275,25 @@ class ExtractTab(QWidget):
             QMessageBox.critical(self, "Erro ao carregar", str(e))
             return
         self.qs.setValue("extract/rom", rom)
-        gba = extract.platform(self.game) == "GBA"
-        if not gba:
+        plat = extract.platform(self.game)
+        gba = plat != "CPS1"
+        mp = plat == "Direto"
+        if plat == "CPS1":
             self.cb_game.setCurrentText(self.game.name)
         self.ls_songs.clear()
         self.song_ids = []
         for sid, _ptr, n in self.game.songs():
             kind = f"{n} faixas" if n > 1 else "1 faixa"
-            self.ls_songs.addItem(f"{extract.song_label(self.game, sid)}  ({kind})")
+            self.ls_songs.addItem(extract.song_label(self.game, sid) if mp
+                                  else f"{extract.song_label(self.game, sid)}  ({kind})")
             self.song_ids.append(sid)
         self.ls_songs.selectAll()
         for w in self._cps1_only:
             w.setEnabled(not gba)
+        for w in (self.ck_midi, self.ck_sf2, self.ck_wav):
+            w.setEnabled(not mp)
+        self.bt_sfx_ch.setEnabled(hasattr(self.game, "effects"))
+        self.bt_neo.setEnabled(hasattr(self.game, "neo_options"))
         self.lb_info.setText(extract.summary(self.game))
         self.log.clear()
         for w in self.game.warnings:
@@ -286,16 +307,21 @@ class ExtractTab(QWidget):
             if not self.game:
                 return
         sel = sorted(self.song_ids[i.row()] for i in self.ls_songs.selectedIndexes())
-        if self.ck_midi.isChecked() and not sel:
+        mp = extract.platform(self.game) == "Direto"
+        if (self.ck_midi.isChecked() or mp) and not sel:
             QMessageBox.information(self, "Extração", "Selecione ao menos uma música.")
             return
         out = self.ed_out.text().strip() or str(Path.home() / "Desktop" / "Audio_extraido")
         self.qs.setValue("extract/out", out)
         opts = dict(plays=self.sp_plays.value(), do_midi=self.ck_midi.isChecked(),
                     do_sf2=self.ck_sf2.isChecked(), do_wav=self.ck_wav.isChecked(),
-                    do_opm=self.ck_opm.isChecked(), do_mdlib=self.ck_lib.isChecked(),
+                    do_mdlib=self.ck_lib.isChecked(),
                     quality="full" if self.rb_full.isChecked() else "quick",
                     song_ids=set(sel) if len(sel) < len(self.song_ids) else None)
+        if hasattr(self.game, "effects"):
+            opts["sfx_channels"] = self._sfx_channels()
+        if hasattr(self.game, "neo_options"):
+            opts["neo_options"] = self._neo_options()
         self.log.clear()
         self.prog.setValue(0)
         self.bt_go.setEnabled(False)
@@ -304,6 +330,50 @@ class ExtractTab(QWidget):
         self.job.signals.prog.connect(lambda a, b: (self.prog.setMaximum(b), self.prog.setValue(a)))
         self.job.signals.done.connect(self._done)
         self.pool.start(self.job)
+
+    # ------------------------------------------------------------- canais dos efeitos
+    def _sfx_key(self) -> str:
+        return f"extract/sfx_channels/{getattr(getattr(self.game, 'board', None), 'key', self.game.name)}"
+
+    def _sfx_channels(self) -> dict:
+        """{comando: (tons do PSG, canais FM)}: o escolhido (salvo por jogo) ou o padrão do jogo."""
+        import json
+        chosen = {}
+        try:
+            chosen = {int(k): (tuple(v[0]), tuple(v[1]))
+                      for k, v in json.loads(self.qs.value(self._sfx_key(), "{}") or "{}").items()}
+        except (ValueError, TypeError, IndexError):
+            pass
+        return {cmd: chosen.get(cmd, dflt) for cmd, _name, dflt in self.game.effects()}
+
+    def edit_sfx_channels(self):
+        import json
+        if not hasattr(self.game, "effects"):
+            return
+        dlg = SfxChannelsDialog(self.game, self._sfx_channels(), self)
+        if dlg.exec():
+            self.qs.setValue(self._sfx_key(), json.dumps(
+                {str(c): [list(p), list(f)] for c, (p, f) in dlg.result_channels().items()}))
+            self.log.appendPlainText("Canais dos efeitos salvos para " + self.game.name + ".")
+
+    # ------------------------------------------------------------- opções do Neo Geo
+    def _neo_options(self) -> dict:
+        import json
+        opt = self.game.neo_options()
+        try:
+            opt.update(json.loads(self.qs.value("extract/neo_options", "{}") or "{}"))
+        except (ValueError, TypeError):
+            pass
+        return opt
+
+    def edit_neo_options(self):
+        import json
+        if not hasattr(self.game, "neo_options"):
+            return
+        dlg = NeoOptionsDialog(self._neo_options(), self.game.neo_options(), self)
+        if dlg.exec():
+            self.qs.setValue("extract/neo_options", json.dumps(dlg.result_options()))
+            self.log.appendPlainText("Opções do Neo Geo salvas.")
 
     def _done(self, base):
         self.job = None
@@ -322,6 +392,17 @@ class ExtractTab(QWidget):
             return
         o = extract.outputs(base)
         self._outs = o
+        if not o.midis and (os.path.isdir(os.path.join(base, "musicas"))
+                            or os.path.isdir(os.path.join(base, "efeitos"))):
+            n_m = len(glob.glob(os.path.join(base, "musicas", "*.xgm")))
+            n_e = len(glob.glob(os.path.join(base, "efeitos", "*.c")))
+            n_v = len(glob.glob(os.path.join(base, "vozes", "*.wav")))
+            for f in sorted(glob.glob(os.path.join(base, "musicas", "*.xgm")) + glob.glob(os.path.join(base, "efeitos", "*.c"))
+                            + glob.glob(os.path.join(base, "vozes", "*.wav"))):
+                self.ls_out.addItem(os.path.relpath(f, base))
+            self.lb_out.setText(f"{n_m} música(s) em XGM/VGM, {n_e} efeito(s) com código C e {n_v} voz(es) em WAV em {base}\n"
+                                "Já estão prontos para o Mega Drive: não precisam passar pela aba Conversão.")
+            return
         for m in o.midis:
             self.ls_out.addItem(os.path.basename(m))
         if o.midis:
@@ -350,3 +431,173 @@ class ExtractTab(QWidget):
 
     def busy(self) -> bool:
         return self.job is not None
+
+
+class SfxChannelsDialog(QDialog):
+    """Tabela: um efeito por linha, com os canais de tom do PSG e os canais FM que ele pode usar."""
+    N_PSG, N_FM = 3, 6
+
+    def __init__(self, game, channels: dict, parent=None):
+        super().__init__(parent)
+        self.game = game
+        self.setWindowTitle(f"Canais dos efeitos — {game.name}")
+        self.resize(900, 420)
+        v = QVBoxLayout(self)
+        tip = QLabel("Cada efeito toca só nos canais marcados. Tons que cabem no PSG usam os tons do PSG "
+                     "marcados; o que não couber (ou se nenhum tom do PSG estiver marcado) vai para os FM "
+                     "marcados, como onda quadrada. Efeitos que soam ao mesmo tempo no jogo (ex.: pulo e "
+                     "tiro) devem ficar em canais diferentes. O ruído sempre usa o 4º canal do PSG. "
+                     "Deixe livres os canais que a música usa (o FM 6 costuma ser o PCM do XGM).")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+        self.effects = game.effects()
+        heads = (["Efeito"] + [f"PSG {i + 1}" for i in range(self.N_PSG)]
+                 + [f"FM {i + 1}" for i in range(self.N_FM)] + ["Divide canal com"])
+        self.table = QTableWidget(len(self.effects), len(heads))
+        self.conflict_col = len(heads) - 1
+        self.table.setHorizontalHeaderLabels(heads)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(len(heads) - 1, QHeaderView.Stretch)
+        self.checks = {}
+        for row, (cmd, name, _dflt) in enumerate(self.effects):
+            self.table.setItem(row, 0, QTableWidgetItem(f"{cmd:02X} {name}"))
+            psg, fm = channels.get(cmd, _dflt)
+            boxes = []
+            for col in range(self.N_PSG + self.N_FM):
+                ck = QCheckBox()
+                on = (col in psg) if col < self.N_PSG else (col - self.N_PSG in fm)
+                ck.setChecked(on)
+                ck.toggled.connect(self._update_conflicts)
+                cell = QWidget()
+                h = QHBoxLayout(cell)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.setAlignment(Qt.AlignCenter)
+                h.addWidget(ck)
+                self.table.setCellWidget(row, 1 + col, cell)
+                boxes.append(ck)
+            self.checks[cmd] = boxes
+            self.table.setItem(row, len(heads) - 1, QTableWidgetItem(""))
+        v.addWidget(self.table, 1)
+        h = QHBoxLayout()
+        b = QPushButton("Padrão do jogo")
+        b.clicked.connect(self.reset)
+        h.addWidget(b)
+        h.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._accept)
+        bb.rejected.connect(self.reject)
+        h.addWidget(bb)
+        v.addLayout(h)
+        self._update_conflicts()
+
+    def result_channels(self) -> dict:
+        out = {}
+        for cmd, boxes in self.checks.items():
+            psg = tuple(i for i in range(self.N_PSG) if boxes[i].isChecked())
+            fm = tuple(i for i in range(self.N_FM) if boxes[self.N_PSG + i].isChecked())
+            out[cmd] = (psg, fm)
+        return out
+
+    def reset(self):
+        for cmd, _name, (psg, fm) in self.effects:
+            for i, ck in enumerate(self.checks[cmd]):
+                ck.setChecked((i in psg) if i < self.N_PSG else (i - self.N_PSG in fm))
+
+    def _update_conflicts(self, *_):
+        res = self.result_channels()
+        names = {cmd: f"{cmd:02X}" for cmd, _n, _d in self.effects}
+        col = self.conflict_col
+        for row, (cmd, _name, _d) in enumerate(self.effects):
+            psg, fm = res[cmd]
+            mine = {("p", c) for c in psg} | {("f", c) for c in fm}
+            others = [names[o] for o, (p2, f2) in res.items() if o != cmd
+                      and mine & ({("p", c) for c in p2} | {("f", c) for c in f2})]
+            self.table.item(row, col).setText(", ".join(others))
+
+    def _accept(self):
+        empty = [f"{cmd:02X} {name}" for cmd, name, _d in self.effects if self.result_channels()[cmd] == ((), ())]
+        if empty:
+            QMessageBox.warning(self, self.windowTitle(), "Marque ao menos um canal para:\n" + "\n".join(empty))
+            return
+        self.accept()
+
+
+class NeoOptionsDialog(QDialog):
+    """Opções da conversão do Neo Geo: onde vão as amostras e quanto elas pesam na ROM."""
+
+    def __init__(self, opt: dict, default: dict, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout
+        self.default = default
+        self.setWindowTitle("Opções do Neo Geo")
+        v = QVBoxLayout(self)
+        tip = QLabel("As amostras ADPCM do Neo Geo viram PCM do XGM (8 bits, 14 kHz), gravadas dentro de cada "
+                     "música — é o que mais pesa na ROM. O relatório de cada música mostra quantos KB ela usa.")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+        f = QFormLayout()
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        self.ck_ch = []
+        for c in (1, 2, 3, 4):
+            ck = QCheckBox(f"CH{c}")
+            self.ck_ch.append(ck)
+            h.addWidget(ck)
+        h.addWidget(QLabel("  (deixe livres os canais das vozes e golpes do jogo)"))
+        h.addStretch(1)
+        f.addRow("Canais PCM da música:", row)
+        self.ck_metal = QCheckBox("Chimbais e pratos no ruído do PSG (economiza PCM e ROM)")
+        f.addRow(self.ck_metal)
+        self.ck_b = QCheckBox("ADPCM-B (instrumento com altura) no FM 5, com o timbre tirado da amostra")
+        f.addRow(self.ck_b)
+        self.sp_len = QDoubleSpinBox()
+        self.sp_len.setRange(0.1, 3.0)
+        self.sp_len.setSingleStep(0.1)
+        self.sp_len.setSuffix(" s")
+        f.addRow("Duração máxima de cada amostra:", self.sp_len)
+        self.cb_step = QComboBox()
+        for txt, val in (("3 dB (mais variações, mais ROM)", 3.0), ("6 dB", 6.0), ("12 dB (menos ROM)", 12.0)):
+            self.cb_step.addItem(txt, val)
+        f.addRow("Volume gravado na amostra, em passos de:", self.cb_step)
+        self.sp_min = QDoubleSpinBox()
+        self.sp_min.setRange(-40, 0)
+        self.sp_min.setSuffix(" dB")
+        f.addRow("Notas mais baixas que (ecos) ficam de fora:", self.sp_min)
+        v.addLayout(f)
+        hb = QHBoxLayout()
+        b = QPushButton("Padrão")
+        b.clicked.connect(lambda: self._set(self.default))
+        hb.addWidget(b)
+        hb.addStretch(1)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._accept)
+        bb.rejected.connect(self.reject)
+        hb.addWidget(bb)
+        v.addLayout(hb)
+        self._set(opt)
+
+    def _set(self, o: dict):
+        for c, ck in enumerate(self.ck_ch, 1):
+            ck.setChecked(c in o.get("pcm_channels", (1, 2)))
+        self.ck_metal.setChecked(bool(o.get("metals_to_noise", True)))
+        self.ck_b.setChecked(bool(o.get("adpcm_b_to_fm", True)))
+        self.sp_len.setValue(float(o.get("max_sample_s", 0.8)))
+        self.cb_step.setCurrentIndex(max(0, self.cb_step.findData(float(o.get("volume_step_db", 6.0)))))
+        self.sp_min.setValue(float(o.get("min_level_db", -15.0)))
+
+    def result_options(self) -> dict:
+        return dict(pcm_channels=[c for c, ck in enumerate(self.ck_ch, 1) if ck.isChecked()],
+                    metals_to_noise=self.ck_metal.isChecked(), adpcm_b_to_fm=self.ck_b.isChecked(),
+                    max_sample_s=round(self.sp_len.value(), 2), volume_step_db=float(self.cb_step.currentData()),
+                    min_level_db=float(self.sp_min.value()))
+
+    def _accept(self):
+        if not any(ck.isChecked() for ck in self.ck_ch):
+            QMessageBox.warning(self, self.windowTitle(), "Marque ao menos um canal PCM para a música.")
+            return
+        self.accept()

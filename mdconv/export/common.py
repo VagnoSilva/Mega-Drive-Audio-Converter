@@ -25,11 +25,45 @@ def export_frames(stream: Stream) -> tuple[list[list[tuple]], int | None]:
     loop = stream.loop_frame
     if end is not None and loop is not None and end > loop:
         frames = frames[:end] + [[] for _ in range(max(0, end - len(frames)))]
-        frames[-1] = frames[-1] + all_off_writes()
+        # Conversão direta de VGM: o estado no fim do loop é o que a música espera no começo dele
+        # (o quadro do loop reescreve tudo), então não se desliga nada — a emenda fica sem buraco.
+        if not stream.stats.get("seamless_loop"):
+            frames[-1] = frames[-1] + all_off_writes()
     else:
         loop = None if (loop is None or loop >= len(frames)) else loop
         frames.append(all_off_writes())
     return frames, loop
+
+
+_SETUP_FM = set(range(0x30, 0xA0)) | set(range(0xB0, 0xB7)) | {0x22, 0x27, 0x2B}
+
+
+def loop_prefix(stream: Stream, frames, loop) -> int:
+    """Quantas escritas do começo do quadro do loop são só preparação (patches, mudos) e ficam
+    ANTES do ponto de loop — como num VGM bem feito: o loop não refaz a inicialização, e
+    ferramentas como o xgmtool não perdem o marcador ao enxugar escritas repetidas.
+
+    Só para a conversão direta de VGM; para no primeiro registro reescrito ou na primeira escrita
+    musical (frequência, key-on, tom/volume do PSG que não seja mudo)."""
+    if loop is None or not stream.stats.get("seamless_loop") or loop >= len(frames):
+        return 0
+    seen = set()
+    n = 0
+    for w in frames[loop]:
+        if w[0] == "fm":
+            key = ("fm", w[1], w[2])
+            ok = w[2] in _SETUP_FM
+        elif w[0] == "psg":
+            b = w[1] & 0xFF
+            key = ("psg", b & 0xF0)
+            ok = (b & 0x90) == 0x90 and (b & 0x0F) == 0x0F       # volume mudo
+        else:
+            break
+        if not ok or key in seen:
+            break
+        seen.add(key)
+        n += 1
+    return n
 
 
 def pcm_mix(stream: Stream, frames: list[list[tuple]]) -> tuple[np.ndarray, int]:

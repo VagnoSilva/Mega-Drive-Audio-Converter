@@ -1,17 +1,27 @@
-# Mega Drive Audio Converter — versão 0.10.0
-
-
-https://www.youtube.com/watch?v=7D0I-a21h58
+# Mega Drive Audio Converter — versão 0.11.1
 
 Conversor de músicas (MIDI + SoundFont) para o som do Mega Drive (YM2612 + SN76489 + PCM),
 com exportação XGM v1 (SGDK), VGM e Furnace.
 
 A janela tem duas abas:
 - **Extração** — tira MIDI + SoundFont direto da ROM: arcades **Capcom CPS1** (.zip do MAME) e
-  **Game Boy Advance** (.gba, motor de som da Nintendo). Na CPS1 os timbres FM originais (YM2151)
+  **Game Boy Advance** (.gba, motor de som da Nintendo). Moon Patrol, Kung-Fu Master, Lode Runner,
+  Ghosts 'n Goblins, Nemesis e KOF 94 a 98 (Neo Geo) saem direto para o Mega Drive (XGM/VGM e efeitos em código C). Na CPS1 os timbres FM originais (YM2151)
   já saem convertidos para YM2612 numa biblioteca de patches aprovados. O botão
   "Abrir na conversão" leva a música escolhida para a outra aba.
 - **Conversão** — o conversor de sempre. Também aceita MIDI + SF2 do GBA Mus Ripper.
+
+Menu **Ferramentas → Conversores e efeitos…** (Ctrl+T) abre uma subtela com os conversores que
+ficam fora do fluxo MIDI + SF2, um por aba:
+- **Música VGM (AY / YM2203)** — para arcades e computadores com o chip AY-3-8910 (Moon Patrol,
+  Kung-Fu Master, MSX, ZX Spectrum…) ou YM2203 (Ghosts 'n Goblins e outros arcades OPN). Os chips
+  são parentes dos do Mega Drive, então a música é traduzida registrador a registrador (sem MIDI)
+  e sai em XGM, VGM e prévia WAV. Uma tabela escolhe o destino de cada canal do AY (automático,
+  PSG tom 1–3, FM 1–6 ou omitir). Código em `mdconv/ay/`, `mdconv/opn/` e `mdconv/vgmconv.py`.
+- **Efeitos de chip (AY)** — efeito em VGM de AY → PSG/FM + código C para o SGDK, nos canais que
+  você marcar como livres.
+- **Efeitos e vozes (WAV)** — PCM de 8 bits na taxa do driver.
+- **Banco de patches .tfi** — junta patches .tfi num banco para os candidatos FM.
 
 O código da extração fica em `mdconv/extract/` (o mesmo do extrator independente da pasta
 `cps1_extractor`, versão em `mdconv/extract/__init__.py`).
@@ -20,6 +30,94 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 `python -m mdconv.cli --version`).
 
 ## Histórico de versões
+
+**0.11.1**
+- Menu Arquivo mais enxuto: a conversão de VGM, os efeitos de chip, os efeitos WAV e o banco .tfi
+  foram para uma subtela própria (Ferramentas → Conversores e efeitos…, Ctrl+T), com uma aba para
+  cada um e as opções na tela, em vez de uma série de perguntas.
+- Conversão direta de VGM com AY-3-8910: escolha do destino de cada canal (automático, PSG tom 1–3,
+  FM 1–6 ou omitir), por exemplo para mandar o baixo para o FM mesmo cabendo no PSG. O botão
+  "Analisar o 1º arquivo" mostra para onde o automático mandaria cada canal.
+- Efeitos de chip: os canais PSG e FM livres são escolhidos na tela (antes, fixos em PSG 1–2 e FM 4–5).
+- Extração dos jogos Irem (Moon Patrol, Kung-Fu Master, Lode Runner): botão "Canais dos efeitos…"
+  escolhe os canais do PSG e do FM de cada efeito (salvo por jogo). Um efeito sem tom do PSG livre
+  vai inteiro para o FM, como onda quadrada. No Moon Patrol, os efeitos que tocam juntos saíam
+  todos no tom 1 do PSG e se anulavam (o UFO voando, contínuo, calava o tiro; pulo e tiro
+  brigavam); o padrão agora separa: UFO voando no PSG 1, tiro e moeda no PSG 2, pulo nos FM 4–5,
+  planta no FM 3, explosão do UFO e passar ponto no FM 2.
+- Extração do **Nemesis** (Konami Bubble System / GX400: Z80 + 2× AY-3-8910 + K005289), com o
+  `nemesis.zip` do MAME: a placa de som é emulada (`mdconv/konami.py`, mapa de memória do MAME) e
+  cada comando vira música (XGM, VGM e prévia) ou efeito (.vgm + .c para o SGDK). Nas músicas, o
+  AY 2 vai para o PSG (partes graves no FM 1–2) e as 2 vozes de tabela de onda do K005289 para os
+  FM 3 e 4, um patch de 4 portadoras com os harmônicos mais fortes de cada forma de onda. O loop
+  sai do estado repetido da placa ou, quando o andamento oscila, da repetição das notas. Os
+  efeitos (AY 1) usam por padrão o FM 5; a tabela "Canais dos efeitos…" também vale para ele.
+- Extração do **Neo Geo**: **KOF 94 a 98** (`kof94.zip` … `kof98.zip`; o KOF 98 também com os nomes
+  de arquivo `kof98_m1.rom`/`kof98_v1.rom`… dos pacotes fora do padrão do MAME). O
+  programa de som da ROM M1 roda no Z80 emulado com os timers do YM2610 (`mdconv/neogeo.py`); as
+  músicas são os comandos do tipo 2 da tabela do próprio programa, achada sozinha no código de dois
+  famílias de programa de som da SNK ("Ver 3.0 by MAKOTO", do 94/95, e "Sound Driver" 0.1/1.1/1.7,
+  do 96/97/98);
+  o comando que libera a música também é achado sozinho. O loop vem do estado repetido da placa ou,
+  quando algum contador nunca se repete (KOF 96), da repetição das notas. Conversão: FM 4 canais → FM 1–4 (frequência recalculada para
+  o clock do Mega Drive), SSG → PSG, ADPCM-A → PCM do XGM (canais 1–2 por padrão, deixando 3–4
+  para as vozes e golpes do jogo; volume gravado na amostra, normalizado pela nota mais forte),
+  chimbais e pratos → ruído do PSG, ADPCM-B (instrumento com altura) → FM 5 com a altura medida na
+  própria amostra. "Opções do Neo Geo…" na aba Extração regula canais e tamanho das amostras; o
+  relatório mostra os KB de PCM de cada música.
+- **Furnace (.fur) também nas conversões diretas** (VGM de AY/YM2203, Moon Patrol, Kung-Fu Master,
+  Lode Runner, Ghosts 'n Goblins, Nemesis, Neo Geo): cada música sai com o `.fur` ao lado do XGM e do
+  VGM (`mdconv/export/fur_stream.py`). O módulo é montado a partir das escritas já convertidas para o
+  Mega Drive (YM2612 DualPCM + SN76489), uma linha por quadro: cada key-on do FM vira nota com o
+  timbre do canal naquele instante como instrumento, volume na coluna de volume, ajustes de altura
+  em E5xx (ou nova nota em legato), PSG e ruído quadro a quadro, amostras PCM num instrumento de
+  bateria (uma tecla por amostra) e o loop com 0Bxx.
+- Removida a exportação do banco de timbres .opm (VOPM) da extração CPS1, que não era usada: os
+  timbres do YM2151 continuam saindo convertidos na biblioteca de patches do Mega Drive.
+
+**0.11.0**
+- Conversão direta de VGM/VGZ com AY-3-8910 (menu Arquivo): tons → PSG (ou FM com onda
+  quadrada, quando a parte desce abaixo de ~109 Hz ou vem de um 2º AY), ruído → ruído do PSG com
+  a mesma taxa do AY (cadenciado pelo tom 3), envelope de hardware do AY recalculado quadro a
+  quadro, loop do VGM preservado. Opção de travar o andamento na grade de 60 Hz.
+- Conversão direta de VGM com **YM2203** (OPN): os timbres passam como estão (mesma família do
+  YM2612), com a frequência recalculada para o clock do Mega Drive e as taxas de envelope corrigidas
+  pela diferença de taxa interna; 2 chips = os 6 canais FM do YM2612. O SSG (onda quadrada) vai
+  para o PSG pelo conversor do AY. O VGM gerado mantém o tempo exato de cada comando.
+- Efeitos de chip sem amostra (menu Arquivo → "Converter efeito de chip (VGM de AY) para PSG/FM +
+  código C…"): o efeito passa pelo conversor do
+  AY e fica preso aos canais livres (PSG 1–2, FM 4–5; tons graves demais para o PSG vão para o FM
+  como onda quadrada). Sai .vgm, prévia e um .c para o SGDK com `nome_play()`/`nome_update()`.
+  Ghosts 'n Goblins (Capcom, Z80 + 2× YM2203): ninguém documentou o formato das partituras, então a
+  placa de som é emulada (`mdconv/z80.py` + `mdconv/capcom_opn.py`, memória e interrupção iguais às
+  do MAME): o programa original roda, recebe cada comando de som (01–3F) e o que ele escreve nos
+  YM2203 vira VGM → conversor do YM2203 (músicas) ou efeito de chip (sons só de SSG). O loop é
+  achado sozinho (estado repetido da placa ou repetição das notas). Conferido contra os VGMs do
+  arcade: notas 93–99% iguais e loops idênticos (32,0 s, 19,2 s, 25,6 s…). Abra o gng.zip na aba
+  Extração; a extração completa leva alguns minutos.
+  Kung-Fu Master (Irem M62) usa a mesma linguagem, com um comando diferente; abrindo o kungfum.zip
+  na aba Extração saem as 5 músicas, 11 efeitos e as 7 vozes digitalizadas (ADPCM do MSM5205
+  decodificado → WAV de 8 bits a 14 kHz). Conferido contra os VGMs do arcade: 94–99% das escritas
+  iguais.
+  Para o Moon Patrol (aba Extração: abra o mpatrol.zip), as 5 músicas (XGM, VGM e prévia, como a conversão de VGM) e os efeitos saem
+  direto da ROM (pastas musicas e efeitos): os scripts de som da ROM (mp-s1.1a, no mpatrol.zip) são interpretados
+  (`mdconv/mpsl.py`, a partir da desmontagem de computerarcheology.com) — exatamente o que o jogo
+  escreve nos AY. Conferido contra os VGMs gravados do arcade: 3 músicas idênticas e as outras 2
+  com 95–98% das escritas iguais. Efeitos contínuos (planta espacial, UFO voando) saem com loop e
+  função `_stop()`. Código em `mdconv/chipsfx.py`.
+- Efeitos sonoros e vozes (menu Arquivo → "Preparar efeitos sonoros e vozes para o SGDK (WAV)…"):
+  WAV de qualquer taxa/resolução → WAV mono de 8 bits na taxa do driver (14.000 Hz = XGM v1), sem
+  o som "rouco": filtro anti-aliasing antes de reamostrar, remoção de DC, volume normalizado (e
+  compressão leve opcional) para usar os 256 níveis, silêncio do começo e do fim cortado, prévia
+  para ouvir no PC e relatório com o tamanho na ROM. Opção de manter o volume relativo entre os
+  arquivos. Código em `mdconv/sfx.py`.
+- Loop dos VGMs convertidos: a duração vem do próprio VGM (quadros inteiros que cabem entre o
+  ponto de loop e o fim), o marcador de loop fica depois da inicialização (patches e mudos não
+  são refeitos a cada volta, e o xgmtool não perde o marcador) e a emenda não desliga as notas.
+- Silêncio do início removido: a música começa na primeira nota, no VGM de AY e na conversão
+  de MIDI (aba Arranjo → "Começar na primeira nota", ligado por padrão; os MIDIs do GBA Mus
+  Ripper têm 1 compasso mudo no começo). O loop acompanha o corte. Projetos salvos antes desta
+  versão abrem com a opção desligada, para continuarem idênticos.
 
 **0.10.0**
 - Extrator embutido: aba **Extração** (CPS1 e GBA) ao lado da aba **Conversão**. Depois de
@@ -333,6 +431,3 @@ Não publique só o `.exe` da pasta `dist\MegaDriveAudioConverter`: ele depende 
 mandar o executável pelo próprio repositório (git) — use os Releases.
 
 Requisitos de quem usa: Windows 10 ou 11, 64 bits (o Python 3.14 não roda em Windows 7/8).
-
-
-

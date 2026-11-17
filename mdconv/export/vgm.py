@@ -20,7 +20,7 @@ import numpy as np
 
 from mdconv.chips.emulator import NTSC_FM_CLOCK, NTSC_PSG_CLOCK
 from mdconv.driver.driver import Stream
-from mdconv.export.common import export_frames, pcm_mix
+from mdconv.export.common import export_frames, loop_prefix, pcm_mix
 
 VGM_RATE = 44100
 
@@ -55,15 +55,17 @@ def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str
 
     # Linha do tempo em amostras de 44,1 kHz: (amostra, ordem, comando)
     events: list[tuple[int, int, bytes]] = []
+    pre = loop_prefix(stream, frames, loop_frame)
     for f, writes in enumerate(frames):
         t = int(round(f * spf))
-        for w in writes:
+        for j, w in enumerate(writes):
+            order = -1 if (f == loop_frame and j < pre) else 0      # -1: antes do ponto de loop
             if w[0] == "fm":
                 if w[2] == 0x2A:          # DAC direto não é usado: o PCM vem do data block
                     continue
-                events.append((t, 0, bytes([0x52 + w[1], w[2], w[3] & 0xFF])))
+                events.append((t, order, bytes([0x52 + w[1], w[2], w[3] & 0xFF])))
             elif w[0] == "psg":
-                events.append((t, 0, bytes([0x50, w[1] & 0xFF])))
+                events.append((t, order, bytes([0x50, w[1] & 0xFF])))
     if has_pcm:
         step = VGM_RATE / stream.pcm_rate
         # só onde há som PCM (economiza bytes); fora disso o DAC fica em 0x80 (silêncio)
@@ -124,7 +126,7 @@ def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str
     i = 0
     while i < len(events):
         t = events[i][0]
-        if loop_t is not None and loop_ofs is None and t >= loop_t:
+        if loop_t is not None and loop_ofs is None and t > loop_t:
             wait(loop_t - cur)
             cur = loop_t
             loop_ofs = len(body)
@@ -132,6 +134,8 @@ def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str
         cur = t
         while i < len(events) and events[i][0] == t:
             _, kind, cmd = events[i]
+            if loop_t is not None and loop_ofs is None and t == loop_t and kind != -1:
+                loop_ofs = len(body)
             if kind == 2:
                 # 0x8n: escreve o próximo byte do banco no DAC e espera n (0..15) amostras;
                 # a espera até o próximo evento vai embutida quando cabe.

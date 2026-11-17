@@ -51,6 +51,7 @@ class ProjectSettings:
     noise_metals: bool = False         # chimbais/pratos no ruído do PSG (libera o PCM)
     fm_alloc: str = "auto"             # canais FM: auto | dinamico (nota a nota) | fixo (por parte)
     snap_tempo: bool = False           # andamento travado na grade de quadros (60 Hz)
+    trim_start: bool = True            # a música começa na primeira nota (tira o silêncio do início)
     fm_att_db: float | None = None     # None = equilíbrio automático
     loop_mode: str = "auto"            # auto | markers | none
     loop_start_tick: int | None = None # escolhido pelo usuário (sobrepõe a detecção)
@@ -71,6 +72,8 @@ class ProjectSettings:
     @classmethod
     def from_json(cls, text: str) -> "ProjectSettings":
         d = json.loads(text)
+        # projetos salvos antes desta opção continuam exatamente como eram (com o silêncio)
+        d.setdefault("trim_start", False)
         known = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in known})
 
@@ -165,6 +168,9 @@ class Project:
         self.plan: Plan | None = None
         self._conversion = None
         self._conv_key = None
+        self._raw_song = None          # a música como está no MIDI
+        self.trim_ticks = 0            # silêncio removido do início (ticks do MIDI)
+        self.trim_seconds = 0.0
 
     # ---------------------------------------------------------------- caminhos
     @property
@@ -191,7 +197,11 @@ class Project:
         if errs:
             raise ValueError("; ".join(errs))
         progress(f"Lendo {Path(self.settings.midi).name}…")
-        self.song = load_song(self.settings.midi)
+        self._raw_song = load_song(self.settings.midi)
+        self.trim_ticks, self.trim_seconds = 0, 0.0
+        self.song = self._raw_song
+        self._trim_on = False
+        self._apply_trim(adjust_loop=False)    # o loop salvo já está na régua da música cortada
         progress(f"Lendo {Path(self.settings.sf2).name}…")
         self.sf = read_sf2(self.settings.sf2)
         self.invalidate()
@@ -202,8 +212,32 @@ class Project:
         if self.song is None or self.sf is None:
             raise RuntimeError("abra o MIDI e o SF2 primeiro")
 
+    def _apply_trim(self, adjust_loop: bool = True) -> None:
+        """Aplica (ou desfaz) o corte do silêncio inicial conforme ``settings.trim_start``.
+        O loop escolhido à mão acompanha o deslocamento."""
+        from mdconv.model.trim import trim_leading_silence
+        if self._raw_song is None:
+            return
+        want = bool(self.settings.trim_start)
+        if want == getattr(self, "_trim_on", False):
+            return
+        s = self.settings
+        if want:
+            self.song, self.trim_ticks, self.trim_seconds = trim_leading_silence(self._raw_song)
+            for k in ("loop_start_tick", "loop_end_tick"):
+                if adjust_loop and getattr(s, k) is not None:
+                    setattr(s, k, max(0, getattr(s, k) - self.trim_ticks))
+        else:
+            for k in ("loop_start_tick", "loop_end_tick"):
+                if adjust_loop and getattr(s, k) is not None:
+                    setattr(s, k, getattr(s, k) + self.trim_ticks)
+            self.song, self.trim_ticks, self.trim_seconds = self._raw_song, 0, 0.0
+        self._trim_on = want
+
     def replan(self) -> Plan:
         self._need()
+        if self._raw_song is not None:
+            self._apply_trim()
         s = self.settings
         self.plan = make_plan(self.song, self.sf, pcm_channels=s.pcm_channels if s.use_pcm else [],
                               use_pcm=s.use_pcm)
@@ -547,6 +581,7 @@ class Project:
     def _key(self):
         s = self.settings
         return (tuple(s.pcm_channels), s.use_pcm, s.vibrato, s.noise_metals, s.fm_alloc, s.snap_tempo,
+                s.trim_start, self.trim_ticks,
                 s.fm_att_db, s.loop_mode,
                 s.loop_start_tick, s.loop_end_tick, self._library_stamp(),
                 json.dumps(s.pinned_patches or {}, sort_keys=True))

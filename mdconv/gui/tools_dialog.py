@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
-    QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from mdconv.ay.convert import AUTO, CH_NAMES, check_routing, dest_label
@@ -115,7 +115,7 @@ class ToolsDialog(QDialog):
         self.resize(760, 640)
         v = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_vgm(), tr("Música VGM (AY / YM2203)"))
+        self.tabs.addTab(self._build_vgm(), tr("Música VGM (AY / YM2203 / Mega Drive)"))
         self.tabs.addTab(self._build_chip_sfx(), tr("Efeitos de chip (AY)"))
         self.tabs.addTab(self._build_wav(), tr("Efeitos e vozes (WAV)"))
         self.tabs.addTab(self._build_tfi(), tr("Banco de patches .tfi"))
@@ -166,9 +166,9 @@ class ToolsDialog(QDialog):
     def _build_vgm(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910 ou YM2203)"))
+        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910, YM2203 ou Mega Drive) ou XGM"))
         gv = QVBoxLayout(g)
-        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910 ou YM2203"), tr("VGM (*.vgm *.vgz)"))
+        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910, YM2203 ou Mega Drive, ou XGM do SGDK"), tr("VGM / XGM (*.vgm *.vgz *.xgm)"))
         gv.addWidget(self.vgm_files)
         v.addWidget(g, 1)
 
@@ -183,6 +183,38 @@ class ToolsDialog(QDialog):
         self.vgm_trim.setChecked(self.qsettings.value("tools/vgm_trim", "true") != "false")
         f.addRow(self.vgm_grid)
         f.addRow(self.vgm_trim)
+        # loop escolhido à mão (vale para todos os arquivos da lista)
+        lr = QWidget()
+        hl = QHBoxLayout(lr)
+        hl.setContentsMargins(0, 0, 0, 0)
+        self.vgm_loop = QCheckBox(tr("Escolher: volta para"))
+        self.vgm_loop.setToolTip(tr("Põe um loop num VGM que não tem, ou muda o que ele tem. Os tempos contam "
+                                    "do começo da música convertida (depois de tirar o silêncio do início, "
+                                    "se essa opção estiver marcada)."))
+        self.vgm_loop_a = QDoubleSpinBox()
+        self.vgm_loop_b = QDoubleSpinBox()
+        for sp in (self.vgm_loop_a, self.vgm_loop_b):
+            sp.setRange(0.0, 3600.0)
+            sp.setDecimals(2)
+            sp.setSuffix(" s")
+        self.vgm_loop_b.setSpecialValueText(tr("fim da música"))
+        self.vgm_loop.setChecked(self.qsettings.value("tools/vgm_loop", "false") == "true")
+        self.vgm_loop_a.setValue(float(self.qsettings.value("tools/vgm_loop_a", 0.0) or 0.0))
+        self.vgm_loop_b.setValue(float(self.qsettings.value("tools/vgm_loop_b", 0.0) or 0.0))
+        hl.addWidget(self.vgm_loop)
+        hl.addWidget(self.vgm_loop_a)
+        hl.addWidget(QLabel(tr("ao chegar a")))
+        hl.addWidget(self.vgm_loop_b)
+        hl.addWidget(QLabel(tr("  (desmarcado = o loop do próprio VGM)")))
+        hl.addStretch(1)
+        f.addRow(tr("Loop:"), lr)
+        self.vgm_pcm = QSpinBox()
+        self.vgm_pcm.setRange(1, 4)
+        self.vgm_pcm.setPrefix("CH")
+        self.vgm_pcm.setValue(int(self.qsettings.value("tools/vgm_pcm", 1) or 1))
+        self.vgm_pcm.setToolTip(tr("Em qual dos 4 canais PCM do XGM vão as amostras do DAC de um VGM do "
+                                   "Mega Drive. Os outros ficam livres para os efeitos do jogo."))
+        f.addRow(tr("Canal PCM (VGM do Mega Drive):"), self.vgm_pcm)
         v.addLayout(f)
 
         g = QGroupBox(tr("Destino de cada canal do AY-3-8910"))
@@ -288,8 +320,18 @@ class ToolsDialog(QDialog):
         if routing:
             self.main._log(tr("Rotas escolhidas: ") + ", ".join(
                 tr("AY{0} {1} → {2}").format(c + 1, CH_NAMES[ch], dest_label(d)) for (c, ch), d in sorted(routing.items())))
+        loop = self.vgm_loop.isChecked()
+        self.qsettings.setValue("tools/vgm_loop", "true" if loop else "false")
+        self.qsettings.setValue("tools/vgm_loop_a", self.vgm_loop_a.value())
+        self.qsettings.setValue("tools/vgm_loop_b", self.vgm_loop_b.value())
+        self.qsettings.setValue("tools/vgm_pcm", self.vgm_pcm.value())
+        a, b = self.vgm_loop_a.value(), self.vgm_loop_b.value()
+        if loop and b and b <= a:
+            QMessageBox.warning(self, self.windowTitle(), tr("O fim do loop tem de vir depois do início."))
+            return
         self.main.convert_vgm_job(files, dst, grid=self.vgm_grid.isChecked(), trim=self.vgm_trim.isChecked(),
-                                  routing=routing or None)
+                                  routing=routing or None, loop_start=a if loop else None,
+                                  loop_end=(b or None) if loop else None, pcm_channel=self.vgm_pcm.value())
 
     # ------------------------------------------------------------- 2. efeitos de chip
     def _build_chip_sfx(self) -> QWidget:

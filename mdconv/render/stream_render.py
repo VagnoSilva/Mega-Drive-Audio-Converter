@@ -76,7 +76,10 @@ def render_stream(stream: Stream, sr_out: int = 44100, normalize: bool = True,
                 if ("noise" if latch == 3 else "psg") in use:
                     psg.write_psg(b)
             elif w[0] == "pcm":
-                playing[w[1]] = [w[2], 0.0]
+                if w[2] == 0:                  # id 0 = parar o canal
+                    playing.pop(w[1], None)
+                else:
+                    playing[w[1]] = [w[2], 0.0]
         acc += spf
         n = int(acc)
         acc -= n

@@ -1156,9 +1156,11 @@ class MainWindow(QMainWindow):
         return self._run(tr("Montando o banco de patches .tfi (milhares de patches levam alguns minutos)"),
                          work, done)
 
-    def convert_vgm_job(self, files, dst, grid=False, trim=True, routing=None, on_done=None):
-        """VGM de AY-3-8910 (Moon Patrol, MSX…) ou YM2203 (Ghosts 'n Goblins…): conversão direta,
-        chip a chip, para XGM/VGM. ``routing``: rotas manuais dos canais do AY."""
+    def convert_vgm_job(self, files, dst, grid=False, trim=True, routing=None, on_done=None,
+                        loop_start=None, loop_end=None, pcm_channel=1):
+        """VGM de AY-3-8910 (Moon Patrol, MSX…), YM2203 (Ghosts 'n Goblins…) ou do próprio Mega
+        Drive: conversão direta para XGM/VGM/.fur. ``routing``: rotas manuais dos canais do AY;
+        ``loop_start``/``loop_end``: loop escolhido à mão (segundos)."""
         from mdconv.vgmconv import convert_file
 
         def work(progress):
@@ -1166,7 +1168,8 @@ class MainWindow(QMainWindow):
             for f in files:
                 progress(f"▶ {Path(f).name}")
                 try:
-                    out += convert_file(f, dst, grid=grid, trim=trim, routing=routing, log=progress)
+                    out += convert_file(f, dst, grid=grid, trim=trim, routing=routing, log=progress,
+                                        loop_start=loop_start, loop_end=loop_end, pcm_channel=pcm_channel)
                 except Exception as exc:              # um arquivo ruim não para o lote
                     bad += 1
                     progress(f"✖ {Path(f).name}: {exc}")

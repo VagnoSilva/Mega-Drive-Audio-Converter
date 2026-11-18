@@ -83,6 +83,8 @@ def pcm_mix(stream: Stream, frames: list[list[tuple]]) -> tuple[np.ndarray, int]
         by_ch.setdefault(ch, []).append((start, sid))
     for evs in by_ch.values():
         for i, (start, sid) in enumerate(evs):
+            if sid == 0:                       # id 0 = parar o canal (como no XGM)
+                continue
             data = stream.pcm_samples[sid].astype(np.int32)
             stop = evs[i + 1][0] if i + 1 < len(evs) else n
             m = min(len(data), stop - start, n - start)

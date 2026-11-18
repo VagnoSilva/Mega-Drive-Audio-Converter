@@ -677,4 +677,30 @@ EN = {
         "drums",
     "eco":
         "echo",
+    "Música VGM (AY / YM2203 / Mega Drive)":
+        "VGM music (AY / YM2203 / Mega Drive)",
+    "Arquivos VGM / VGZ (AY-3-8910, YM2203 ou Mega Drive)":
+        "VGM / VGZ files (AY-3-8910, YM2203 or Mega Drive)",
+    "VGM com AY-3-8910, YM2203 ou Mega Drive":
+        "VGM with AY-3-8910, YM2203 or Mega Drive",
+    "Escolher: volta para":
+        "Choose: loop back to",
+    "Põe um loop num VGM que não tem, ou muda o que ele tem. Os tempos contam do começo da música convertida (depois de tirar o silêncio do início, se essa opção estiver marcada).":
+        "Adds a loop to a VGM that has none, or changes the one it has. Times count from the start of the converted song (after removing the silence at the start, if that option is checked).",
+    "fim da música":
+        "end of song",
+    "ao chegar a":
+        "when reaching",
+    "  (desmarcado = o loop do próprio VGM)":
+        "  (unchecked = the VGM's own loop)",
+    "Em qual dos 4 canais PCM do XGM vão as amostras do DAC de um VGM do Mega Drive. Os outros ficam livres para os efeitos do jogo.":
+        "Which of the 4 XGM PCM channels gets the DAC samples of a Mega Drive VGM. The others stay free for the game's sound effects.",
+    "Canal PCM (VGM do Mega Drive):":
+        "PCM channel (Mega Drive VGM):",
+    "O fim do loop tem de vir depois do início.":
+        "The loop end must come after the start.",
+    "Arquivos VGM / VGZ (AY-3-8910, YM2203 ou Mega Drive) ou XGM":
+        "VGM / VGZ files (AY-3-8910, YM2203 or Mega Drive) or XGM",
+    "VGM com AY-3-8910, YM2203 ou Mega Drive, ou XGM do SGDK":
+        "VGM with AY-3-8910, YM2203 or Mega Drive, or SGDK XGM",
 }

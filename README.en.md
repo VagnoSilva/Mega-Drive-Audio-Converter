@@ -31,8 +31,11 @@ The window has two tabs:
 **Tools → Converters and effects…** (Ctrl+T) opens a window with the converters outside the
 MIDI + SF2 flow:
 
-- **VGM music (AY / YM2203)** — AY-3-8910 (arcades, MSX, ZX Spectrum…) and YM2203 VGMs translated
-  register by register, with a choice of destination for each AY channel.
+- **VGM music (AY / YM2203 / Mega Drive)** — AY-3-8910 (arcades, MSX, ZX Spectrum…) and YM2203 VGMs
+  translated register by register, with a choice of destination for each AY channel; VGMs that are
+  already Mega Drive music (YM2612 + SN76489) repackaged as XGM/.fur, with the DAC samples as XGM PCM.
+  A ready-made SGDK XGM can also be turned into VGM, .fur and a preview. The loop can be added or
+  changed.
 - **Chip effects (AY)** — AY effect VGMs → PSG/FM + C code for SGDK, on the channels you mark as free.
 - **Sound effects and voices (WAV)** — 8-bit PCM at the driver rate, without the "hoarse" sound.
 - **.tfi patch bank** — gathers .tfi patches into a bank of FM candidates.

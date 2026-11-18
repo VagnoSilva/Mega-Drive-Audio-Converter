@@ -241,6 +241,9 @@ def build(stream, name: str = "", author: str = "", game: str = ""):
                 if pch > 2:
                     merged += 1
                 c = cell(n_fm + slot, row)
+                if sid == 0:                   # parar o canal
+                    c.note = NOTE_OFF
+                    continue
                 c.note = sid_key.get(sid, 24) + 48
                 c.ins = kit
                 rep.notes += 1

@@ -5,11 +5,8 @@ Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.1
 ## [0.11.2] — 2026-11-18
 
 ### Novidades
-- **Interface em inglês** (Ajuda → Idioma / Language): Português ou English. Na primeira vez segue o idioma do
-  Windows; a troca vale ao reabrir o programa. Toda a janela é traduzida (menus, abas, botões, campos, dicas,
-  mensagens e as subtelas Ferramentas, Canais dos efeitos e Opções do Neo Geo). O registro, os relatórios e as
-  mensagens de erro do conversor continuam em português.
-- **Manual em inglês** (`Manual_Mega_Drive_Audio_Converter_EN.pdf`) e **README em inglês** (`README.en.md`).
+
+**Conversão de MIDI**
 - **MIDI sem SoundFont**: o campo SoundFont da aba Conversão pode ficar vazio. Um MIDI comum (General MIDI)
   usa o banco General MIDI padrão do programa: kit de bateria com as 47 peças do GM e os 128 instrumentos GM
   como referência para os patches FM. Na linha de comando, `gm` no lugar do `.sf2`.
@@ -20,6 +17,23 @@ Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.1
 - **Canais PSG de tom no arranjo** (aba Arranjo → "Canais PSG de tom: PSG1 PSG2 PSG3"): desmarque os tons do
   PSG que a música não deve usar — por exemplo, quando o transbordo para o PSG soa como chiado. As notas ficam no
   FM ou nos PSG marcados; o que não couber aparece no relatório. Salvo no projeto.
+
+**Ferramentas → Música VGM**
+- **VGM do Mega Drive → XGM / VGM / Furnace**: VGMs que já são do Mega Drive (YM2612 + SN76489 — rips,
+  DefleMask, Furnace, SMPSPlay…) são reempacotados como faz o xgmtool: escritas no FM e no PSG por quadro, e as
+  amostras do DAC (blocos comprimidos ou não, tocados por stream ou byte a byte) viram PCM do XGM no canal
+  escolhido (CH1 a CH4).
+- **XGM → VGM / Furnace**: um XGM pronto do SGDK vira VGM, .fur e prévia (no .fur, os canais PCM 3–4 vão para o
+  PCM 2).
+- **Pôr ou mudar o loop** em todas as conversões de VGM (AY, YM2203, Mega Drive e XGM): "Escolher: volta para …
+  ao chegar a …"; o "ao chegar a" também corta a música.
+
+**Interface e documentação**
+- **Interface em inglês** (Ajuda → Idioma / Language): Português ou English. Na primeira vez segue o idioma do
+  Windows; a troca vale ao reabrir o programa. Toda a janela é traduzida (menus, abas, botões, campos, dicas,
+  mensagens e as subtelas Ferramentas, Canais dos efeitos e Opções do Neo Geo). O registro, os relatórios e as
+  mensagens de erro do conversor continuam em português.
+- **Manual em inglês** (`Manual_Mega_Drive_Audio_Converter_EN.pdf`) e **README em inglês** (`README.en.md`).
 
 ### Correções
 - Furnace (.fur) de MIDIs com resolução alta (ex.: 480 ticks por semínima, comum nos MIDIs da internet): o

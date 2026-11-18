@@ -1,6 +1,7 @@
 """Conversão direta de VGM/VGZ para o Mega Drive, chip a chip (sem MIDI).
 
-Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`) e YM2203 / OPN (:mod:`mdconv.opn`). O chip é
+Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`), YM2203 / OPN (:mod:`mdconv.opn`) e VGMs que já
+são do Mega Drive — YM2612 + SN76489 (:mod:`mdconv.mdvgm`, só reempacota). O chip é
 reconhecido pelo cabeçalho do VGM.
 """
 from __future__ import annotations
@@ -14,6 +15,8 @@ def detect_chip(path) -> str:
     d = Path(path).read_bytes()
     if d[:2] == b"\x1f\x8b":
         d = gzip.decompress(d)
+    if d[:4] == b"XGM ":
+        return "XGM"
     if d[:4] != b"Vgm ":
         raise ValueError("Não é um arquivo VGM/VGZ.")
     ver = struct.unpack_from("<I", d, 8)[0]
@@ -26,32 +29,71 @@ def detect_chip(path) -> str:
         return "YM2203"
     if clk(0x74):
         return "AY-3-8910"
+    from mdconv.mdvgm import is_md_vgm
+    if is_md_vgm(d):
+        return "Mega Drive"
     names = {0x0C: "SN76489", 0x10: "YM2413", 0x2C: "YM2612", 0x30: "YM2151", 0x48: "YM2608",
              0x4C: "YM2610", 0x50: "YM3812", 0x98: "OKIM6295", 0xA0: "K054539"}
     found = [n for off, n in names.items() if clk(off)]
     raise ValueError("Chip não suportado na conversão direta"
-                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910 e YM2203.")
+                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910, YM2203 e Mega Drive (YM2612 + SN76489).")
 
 
 def convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, wav=True, log=print,
-                 trim=True, routing=None):
-    """Converte um VGM/VGZ e grava XGM, VGM e prévia WAV. Devolve a lista de arquivos.
+                 trim=True, routing=None, loop_start=None, loop_end=None, pcm_channel=1):
+    """Converte um VGM/VGZ e grava XGM, VGM, .fur e prévia WAV. Devolve a lista de arquivos.
     ``routing``: rotas manuais dos canais do AY-3-8910 (ver :func:`mdconv.ay.convert.plan_routes`);
-    ignoradas no YM2203."""
+    ignoradas nos outros chips. ``loop_start``/``loop_end`` (segundos, contados do começo da música
+    convertida): põem ou mudam o loop; ``loop_end`` corta a música ali. ``pcm_channel``: canal PCM
+    do XGM das amostras de um VGM do Mega Drive."""
+    from mdconv.mdvgm import apply_loop
     path = Path(path)
     chip = detect_chip(path)
+    edit = loop_start is not None or loop_end is not None
+    if chip == "XGM":
+        stream, report, gd3 = read_xgm_stream(path)
+        apply_loop(stream, loop_start, loop_end, report)
+        edited = loop_start is not None or loop_end is not None
+        # o próprio XGM não é regravado, a não ser que o loop tenha mudado
+        return write_outputs(stream, report, gd3, path, out_dir, name, xgm and edited, vgm, wav, log, chip)
+    if chip == "Mega Drive":
+        from mdconv import mdvgm
+        src = mdvgm.read_vgm(path)
+        stream, report = mdvgm.convert(src, pcm_channel=pcm_channel, trim=trim, loop_start=loop_start,
+                                       loop_end=loop_end)
+        return write_outputs(stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip)
     if chip == "YM2203":
         from mdconv.opn.convert import convert, read_vgm
         src = read_vgm(path)
         conv = convert(src, trim=trim)
-        if conv.exact:
+        if conv.exact and not edit:
             return write_outputs(conv.stream, conv.report, src.gd3, path, out_dir, name, xgm, vgm, wav,
                                  log, chip, exact=(conv.exact, conv.exact_end, conv.exact_loop))
     else:
         from mdconv.ay.convert import convert, read_vgm
         src = read_vgm(path)
         conv = convert(src, grid=grid, trim=trim, routing=routing)
-    return write_outputs(conv.stream, conv.report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip)
+    report = list(conv.report)
+    apply_loop(conv.stream, loop_start, loop_end, report)
+    return write_outputs(conv.stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip)
+
+
+def read_xgm_stream(path):
+    """XGM v1 (SGDK) → (Stream, relatório, gd3): as mesmas escritas e amostras, para gerar VGM,
+    .fur e prévia. O XGM não guarda título: o nome do arquivo vira o título."""
+    from mdconv.driver.driver import Stream
+    from mdconv.export.xgm import read_xgm
+    x = read_xgm(Path(path).read_bytes())
+    fps = 50.0 if x.pal else 60.0
+    stream = Stream(frames=x.frames, fps=fps, loop_frame=x.loop_frame, pcm_samples=x.samples,
+                    pcm_rate=14000.0)
+    used = sorted({w[1] for f in x.frames for w in f if w[0] == "pcm" and w[2]})
+    report = [f"XGM v{x.version} ({'PAL, 50' if x.pal else 'NTSC, 60'} quadros/s): {len(x.frames)} quadros "
+              f"({len(x.frames) / fps:.1f} s), {len(x.samples)} amostra(s) "
+              f"({sum(len(s) for s in x.samples.values()) / 1024:.0f} KB), canais PCM "
+              f"{', '.join(map(str, used)) or '—'}"
+              + (f"; loop em {x.loop_frame / fps:.2f} s" if x.loop_frame is not None else "; sem loop")]
+    return stream, report, {"titulo": Path(path).stem}
 
 
 def write_exact_vgm(events, total, loop, path, title="", game="", author="", notes=""):

@@ -35,6 +35,11 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 ## Histórico de versões
 
 **0.11.2**
+- **VGM do Mega Drive** (YM2612 + SN76489) na aba Música VGM das Ferramentas: reempacotado para
+  XGM/VGM/.fur (`mdconv/mdvgm.py`), com as amostras do DAC — blocos de dados tipo 0x00 e
+  comprimidos 0x40 (n bits e DPCM, tabela 0x7F), streams 0x90–0x95 e escrita direta 0x80/0xE0 —
+  virando PCM do XGM no canal escolhido. A mesma aba aceita XGM pronto (→ VGM, .fur e prévia). Loop escolhido à mão (`loop_start`/`loop_end`) em todas
+  as conversões de VGM.
 - **Interface em inglês**: menu Ajuda → Idioma / Language (Português ou English; na primeira vez
   segue o idioma do Windows; vale ao reabrir). Os textos da janela passam por `tr()`
   (`mdconv/i18n.py`) e a tradução fica em `mdconv/i18n_en.py`; o registro, os relatórios e as

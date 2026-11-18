@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from mdconv.i18n import tr
 from mdconv.io_sf2.resolve import find_preset, resolve_voices
 from mdconv.io_sf2.sf2 import Generator, SoundFont, read_sf2
 
@@ -386,10 +387,10 @@ def drum_problem(song, sf: SoundFont) -> str | None:
     progs = sorted({n.program for n in drums})
     kits = [pm.get((128, p)) or pm.get((128, 0)) for p in progs]
     if any(k is None for k in kits):
-        return "o SoundFont não tem kit de bateria General MIDI (banco 128)"
+        return tr("o SoundFont não tem kit de bateria General MIDI (banco 128)")
     if any(re.search(r" Oki \d{3}$", k.name.strip()) for k in kits):
-        return ("o “kit” deste SoundFont são as amostras do Oki de um jogo CPS1 (bateria misturada com "
-                "vozes e efeitos), não um kit General MIDI")
+        return tr("o “kit” deste SoundFont são as amostras do Oki de um jogo CPS1 (bateria misturada com "
+                  "vozes e efeitos), não um kit General MIDI")
     keys = sorted({n.key for n in drums})
     missing, samples = 0, set()
     for key in keys:
@@ -402,9 +403,10 @@ def drum_problem(song, sf: SoundFont) -> str | None:
             missing += 1
         samples.update(v.sample.index for v in vs)
     if missing > max(1, len(keys) * 0.3):
-        return f"o kit de bateria deste SoundFont não tem {missing} das {len(keys)} peças que a música usa"
+        return tr("o kit de bateria deste SoundFont não tem {0} das {1} peças que a música usa").format(
+            missing, len(keys))
     if len(keys) >= 3 and len(samples) <= 1:
-        return "no kit de bateria deste SoundFont todas as peças tocam a mesma amostra"
+        return tr("no kit de bateria deste SoundFont todas as peças tocam a mesma amostra")
     return None
 
 
@@ -412,8 +414,8 @@ def instruments_problem(song, sf: SoundFont) -> str | None:
     """Aviso (sem troca) quando um MIDI comum vem com o SF2 extraído de um jogo."""
     if extracted_midi(song) or not game_soundfont(sf):
         return None
-    return ("os instrumentos deste SoundFont são de um jogo extraído, não de um banco General MIDI: "
-            "cada instrumento do MIDI vai soar como o timbre do jogo que tiver o mesmo número")
+    return tr("os instrumentos deste SoundFont são de um jogo extraído, não de um banco General MIDI: "
+              "cada instrumento do MIDI vai soar como o timbre do jogo que tiver o mesmo número")
 
 
 # ============================================================================ troca do kit
@@ -480,22 +482,22 @@ def prepare(song, sf: SoundFont | None) -> tuple[SoundFont, list[str], str | Non
     * kit de bateria incompatível → o do SF2 trocado pelo kit padrão.
     """
     if sf is None:
-        msg = ("Esta música está sem SoundFont: os instrumentos e a bateria vêm do banco General MIDI "
-               "padrão do programa. A bateria usa o kit padrão; os instrumentos começam com timbres "
-               "genéricos — gere candidatos e aprove os patches FM normalmente.")
+        msg = tr("Esta música está sem SoundFont: os instrumentos e a bateria vêm do banco General MIDI "
+                 "padrão do programa. A bateria usa o kit padrão; os instrumentos começam com timbres "
+                 "genéricos — gere candidatos e aprove os patches FM normalmente.")
         return default_soundfont(), ["sem SoundFont: usando o banco General MIDI padrão"], msg
     notes, msg = [], None
     why = drum_problem(song, sf)
     if why:
         sf = with_default_drums(sf)
         notes.append(f"bateria: {why} → usando o kit de bateria padrão (General MIDI)")
-        msg = (f"O SoundFont escolhido não é compatível com a bateria desta música: {why}.\n\n"
-               "Será usado o kit de bateria padrão do programa (General MIDI). Os outros instrumentos "
-               "continuam vindo do SoundFont.")
+        msg = tr("O SoundFont escolhido não é compatível com a bateria desta música: {0}.\n\n"
+                 "Será usado o kit de bateria padrão do programa (General MIDI). Os outros instrumentos "
+                 "continuam vindo do SoundFont.").format(why)
     other = instruments_problem(song, sf)
     if other:
         notes.append(other)
-        msg = (msg + "\n\n" if msg else "") + (
-            f"Atenção: {other}. Se este MIDI não veio da aba Extração, deixe o campo SoundFont vazio "
-            "para usar o banco General MIDI padrão.")
+        msg = (msg + "\n\n" if msg else "") + tr(
+            "Atenção: {0}. Se este MIDI não veio da aba Extração, deixe o campo SoundFont vazio "
+            "para usar o banco General MIDI padrão.").format(other)
     return sf, notes, msg

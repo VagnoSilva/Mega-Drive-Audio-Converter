@@ -5,6 +5,11 @@ Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.1
 ## [0.11.2] — 2026-11-18
 
 ### Novidades
+- **Interface em inglês** (Ajuda → Idioma / Language): Português ou English. Na primeira vez segue o idioma do
+  Windows; a troca vale ao reabrir o programa. Toda a janela é traduzida (menus, abas, botões, campos, dicas,
+  mensagens e as subtelas Ferramentas, Canais dos efeitos e Opções do Neo Geo). O registro, os relatórios e as
+  mensagens de erro do conversor continuam em português.
+- **Manual em inglês** (`Manual_Mega_Drive_Audio_Converter_EN.pdf`) e **README em inglês** (`README.en.md`).
 - **MIDI sem SoundFont**: o campo SoundFont da aba Conversão pode ficar vazio. Um MIDI comum (General MIDI)
   usa o banco General MIDI padrão do programa: kit de bateria com as 47 peças do GM e os 128 instrumentos GM
   como referência para os patches FM. Na linha de comando, `gm` no lugar do `.sf2`.

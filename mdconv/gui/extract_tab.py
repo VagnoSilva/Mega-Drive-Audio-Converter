@@ -4,6 +4,7 @@ Funciona sozinha, como o extrator independente. O botão "Abrir na conversão" l
 escolhida (MIDI + SF2 + biblioteca, quando houver) para a aba "Conversão"."""
 from __future__ import annotations
 
+from mdconv.i18n import tr
 import glob
 import os
 import traceback
@@ -71,12 +72,12 @@ class ExtractTab(QWidget):
     def _build(self):
         v = QVBoxLayout(self)
 
-        g1 = QGroupBox("1. ROM do jogo — .zip do MAME ou pasta (CPS1), .gba (Game Boy Advance)")
+        g1 = QGroupBox(tr("1. ROM do jogo — .zip do MAME ou pasta (CPS1), .gba (Game Boy Advance)"))
         l1 = QVBoxLayout(g1)
         r1 = QHBoxLayout()
         self.ed_rom = QLineEdit()
-        self.ed_rom.setPlaceholderText("Escolha o arquivo da ROM…")
-        b_file, b_dir = QPushButton("Arquivo…"), QPushButton("Pasta…")
+        self.ed_rom.setPlaceholderText(tr("Escolha o arquivo da ROM…"))
+        b_file, b_dir = QPushButton(tr("Arquivo…")), QPushButton(tr("Pasta…"))
         b_file.clicked.connect(self.pick_file)
         b_dir.clicked.connect(self.pick_dir)
         r1.addWidget(self.ed_rom, 1)
@@ -84,7 +85,7 @@ class ExtractTab(QWidget):
         r1.addWidget(b_dir)
         l1.addLayout(r1)
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Jogo CPS1:"))
+        r2.addWidget(QLabel(tr("Jogo CPS1:")))
         self.cb_game = QComboBox()
         self.cb_game.setMinimumWidth(180)
         self.cb_game.addItem("")
@@ -92,13 +93,14 @@ class ExtractTab(QWidget):
             self.cb_game.addItems(extract.cps1_games())
         except Exception:  # noqa: BLE001
             pass
-        self.cb_game.setToolTip("Só para CPS1: o jogo é reconhecido pelo nome do zip; escolha aqui se não for.")
+        self.cb_game.setToolTip(tr("Só para CPS1: o jogo é reconhecido pelo nome do zip; escolha aqui se não for."))
         r2.addWidget(self.cb_game)
-        self.bt_load = QPushButton("Carregar")
+        self.bt_load = QPushButton(tr("Carregar"))
         self.bt_load.clicked.connect(self.load)
         r2.addWidget(self.bt_load)
-        self.lb_info = QLabel(f"{self.cb_game.count() - 1} jogos CPS1 + jogos de GBA com o motor de som da Nintendo"
-                              " + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98), direto para o Mega Drive")
+        self.lb_info = QLabel(tr("{0} jogos CPS1 + jogos de GBA com o motor de som da Nintendo + Irem (Moon Patrol, Kung-Fu "
+                                 "Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98), direto para o "
+                                 "Mega Drive").format(self.cb_game.count() - 1))
         self.lb_info.setStyleSheet("color: #888; margin-left: 12px")
         r2.addWidget(self.lb_info, 1)
         l1.addLayout(r2)
@@ -106,13 +108,13 @@ class ExtractTab(QWidget):
 
         # ---- meio: músicas | opções + saída
         mid = QHBoxLayout()
-        g2 = QGroupBox("2. Músicas")
+        g2 = QGroupBox(tr("2. Músicas"))
         l2 = QHBoxLayout(g2)
         self.ls_songs = QListWidget()
         self.ls_songs.setSelectionMode(QAbstractItemView.ExtendedSelection)
         l2.addWidget(self.ls_songs, 1)
         bb = QVBoxLayout()
-        b_all, b_none = QPushButton("Todas"), QPushButton("Nenhuma")
+        b_all, b_none = QPushButton(tr("Todas")), QPushButton(tr("Nenhuma"))
         b_all.clicked.connect(self.ls_songs.selectAll)
         b_none.clicked.connect(self.ls_songs.clearSelection)
         bb.addWidget(b_all)
@@ -122,18 +124,18 @@ class ExtractTab(QWidget):
         mid.addWidget(g2, 1)
 
         right = QVBoxLayout()
-        g3 = QGroupBox("3. O que gerar")
+        g3 = QGroupBox(tr("3. O que gerar"))
         l3 = QVBoxLayout(g3)
-        self.ck_midi = QCheckBox("MIDI das músicas")
-        self.ck_sf2 = QCheckBox("SoundFont (.sf2)")
-        self.ck_wav = QCheckBox("Samples do Oki (.wav) — CPS1")
-        self.ck_lib = QCheckBox("Biblioteca de patches FM — CPS1")
+        self.ck_midi = QCheckBox(tr("MIDI das músicas"))
+        self.ck_sf2 = QCheckBox(tr("SoundFont (.sf2)"))
+        self.ck_wav = QCheckBox(tr("Samples do Oki (.wav) — CPS1"))
+        self.ck_lib = QCheckBox(tr("Biblioteca de patches FM — CPS1"))
         for c in (self.ck_midi, self.ck_sf2, self.ck_wav, self.ck_lib):
             c.setChecked(True)
             l3.addWidget(c)
-        l3.addWidget(QLabel("Qualidade do SF2 (CPS1):"))
-        self.rb_full = QRadioButton("Completa (3 amostras/instr.)")
-        self.rb_quick = QRadioButton("Rápida (1 amostra/instr.)")
+        l3.addWidget(QLabel(tr("Qualidade do SF2 (CPS1):")))
+        self.rb_full = QRadioButton(tr("Completa (3 amostras/instr.)"))
+        self.rb_quick = QRadioButton(tr("Rápida (1 amostra/instr.)"))
         self.rb_full.setChecked(True)
         grp = QButtonGroup(self)
         grp.addButton(self.rb_full)
@@ -141,7 +143,7 @@ class ExtractTab(QWidget):
         l3.addWidget(self.rb_full)
         l3.addWidget(self.rb_quick)
         hp = QHBoxLayout()
-        hp.addWidget(QLabel("Repetições do loop (CPS1):"))
+        hp.addWidget(QLabel(tr("Repetições do loop (CPS1):")))
         self.sp_plays = QSpinBox()
         self.sp_plays.setRange(1, 8)
         self.sp_plays.setValue(2)
@@ -149,35 +151,35 @@ class ExtractTab(QWidget):
         hp.addStretch(1)
         l3.addLayout(hp)
         self._cps1_only = [self.ck_wav, self.ck_lib, self.rb_full, self.rb_quick, self.sp_plays]
-        self.bt_sfx_ch = QPushButton("Canais dos efeitos…")
-        self.bt_sfx_ch.setToolTip("Escolhe em quais canais do PSG e do FM cada efeito de chip toca, para "
-                                  "efeitos que soam juntos no jogo não brigarem pelo mesmo canal.")
+        self.bt_sfx_ch = QPushButton(tr("Canais dos efeitos…"))
+        self.bt_sfx_ch.setToolTip(tr("Escolhe em quais canais do PSG e do FM cada efeito de chip toca, para "
+                                  "efeitos que soam juntos no jogo não brigarem pelo mesmo canal."))
         self.bt_sfx_ch.clicked.connect(self.edit_sfx_channels)
         self.bt_sfx_ch.setEnabled(False)
         l3.addWidget(self.bt_sfx_ch)
-        self.bt_neo = QPushButton("Opções do Neo Geo…")
-        self.bt_neo.setToolTip("Canais PCM da música, peças metálicas no ruído do PSG e tamanho das amostras "
-                               "(o que mais pesa na ROM).")
+        self.bt_neo = QPushButton(tr("Opções do Neo Geo…"))
+        self.bt_neo.setToolTip(tr("Canais PCM da música, peças metálicas no ruído do PSG e tamanho das amostras "
+                               "(o que mais pesa na ROM)."))
         self.bt_neo.clicked.connect(self.edit_neo_options)
         self.bt_neo.setEnabled(False)
         l3.addWidget(self.bt_neo)
         right.addWidget(g3)
 
-        g4 = QGroupBox("4. Pasta de saída")
+        g4 = QGroupBox(tr("4. Pasta de saída"))
         l4 = QVBoxLayout(g4)
         r4 = QHBoxLayout()
         self.ed_out = QLineEdit()
-        b_out = QPushButton("Procurar…")
+        b_out = QPushButton(tr("Procurar…"))
         b_out.clicked.connect(self.pick_out)
         r4.addWidget(self.ed_out, 1)
         r4.addWidget(b_out)
         l4.addLayout(r4)
         r5 = QHBoxLayout()
-        self.bt_go = QPushButton("Extrair")
+        self.bt_go = QPushButton(tr("Extrair"))
         self.bt_go.setMinimumHeight(36)
         self.bt_go.setStyleSheet("font-weight: bold")
         self.bt_go.clicked.connect(self.run)
-        self.bt_open = QPushButton("Abrir pasta")
+        self.bt_open = QPushButton(tr("Abrir pasta"))
         self.bt_open.setMinimumHeight(36)
         self.bt_open.clicked.connect(self.open_folder)
         self.bt_open.setEnabled(False)
@@ -198,25 +200,25 @@ class ExtractTab(QWidget):
         self.prog.setTextVisible(True)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setPlaceholderText("O registro da extração aparece aqui.")
+        self.log.setPlaceholderText(tr("O registro da extração aparece aqui."))
 
-        g5 = QGroupBox("5. Levar para a conversão")
+        g5 = QGroupBox(tr("5. Levar para a conversão"))
         l5 = QVBoxLayout(g5)
         self.ls_out = QListWidget()
         self.ls_out.itemDoubleClicked.connect(lambda _it: self.send_to_converter())
         l5.addWidget(self.ls_out, 1)
-        self.lb_out = QLabel("Extraia um jogo para ver os MIDIs aqui.")
+        self.lb_out = QLabel(tr("Extraia um jogo para ver os MIDIs aqui."))
         self.lb_out.setWordWrap(True)
         self.lb_out.setStyleSheet("color: #888")
         l5.addWidget(self.lb_out)
-        self.bt_send = QPushButton("Abrir na conversão →")
+        self.bt_send = QPushButton(tr("Abrir na conversão →"))
         self.bt_send.setMinimumHeight(32)
         self.bt_send.clicked.connect(self.send_to_converter)
         self.bt_send.setEnabled(False)
         l5.addWidget(self.bt_send)
 
         bottom = QSplitter(Qt.Horizontal)
-        logw = QGroupBox("Registro")
+        logw = QGroupBox(tr("Registro"))
         lv = QVBoxLayout(logw)
         lv.addWidget(self.prog)
         lv.addWidget(self.log, 1)
@@ -235,18 +237,18 @@ class ExtractTab(QWidget):
     # ------------------------------------------------------------- ações
     def pick_file(self):
         p, _ = QFileDialog.getOpenFileName(
-            self, "Escolha a ROM", self.ed_rom.text() or str(Path.home()),
-            "ROMs (*.zip *.gba *.agb);;Romset do MAME (CPS1) (*.zip);;Game Boy Advance (*.gba *.agb);;Todos (*.*)")
+            self, tr("Escolha a ROM"), self.ed_rom.text() or str(Path.home()),
+            tr("ROMs (*.zip *.gba *.agb);;Romset do MAME (CPS1) (*.zip);;Game Boy Advance (*.gba *.agb);;Todos (*.*)"))
         if p:
             self._set_rom(p)
 
     def pick_dir(self):
-        p = QFileDialog.getExistingDirectory(self, "Pasta com as ROMs (CPS1)", self.ed_rom.text() or str(Path.home()))
+        p = QFileDialog.getExistingDirectory(self, tr("Pasta com as ROMs (CPS1)"), self.ed_rom.text() or str(Path.home()))
         if p:
             self._set_rom(p)
 
     def pick_out(self):
-        p = QFileDialog.getExistingDirectory(self, "Pasta de saída", self.ed_out.text() or str(Path.home()))
+        p = QFileDialog.getExistingDirectory(self, tr("Pasta de saída"), self.ed_out.text() or str(Path.home()))
         if p:
             self.ed_out.setText(p)
 
@@ -261,18 +263,18 @@ class ExtractTab(QWidget):
             self.cb_game.setCurrentText(g)
             self.load()
         else:
-            self.lb_info.setText("Escolha o jogo CPS1 na lista e clique em Carregar.")
+            self.lb_info.setText(tr("Escolha o jogo CPS1 na lista e clique em Carregar."))
 
     def load(self):
         rom = self.ed_rom.text().strip()
         if not rom:
-            QMessageBox.information(self, "Extração", "Escolha primeiro a ROM (.zip, .gba ou pasta).")
+            QMessageBox.information(self, tr("Extração"), tr("Escolha primeiro a ROM (.zip, .gba ou pasta)."))
             return
         try:
             self.game = extract.open_rom(rom, self.cb_game.currentText().strip() or None)
         except Exception as e:  # noqa: BLE001
             self.game = None
-            QMessageBox.critical(self, "Erro ao carregar", str(e))
+            QMessageBox.critical(self, tr("Erro ao carregar"), str(e))
             return
         self.qs.setValue("extract/rom", rom)
         plat = extract.platform(self.game)
@@ -283,7 +285,7 @@ class ExtractTab(QWidget):
         self.ls_songs.clear()
         self.song_ids = []
         for sid, _ptr, n in self.game.songs():
-            kind = f"{n} faixas" if n > 1 else "1 faixa"
+            kind = tr("{0} faixas").format(n) if n > 1 else tr("1 faixa")
             self.ls_songs.addItem(extract.song_label(self.game, sid) if mp
                                   else f"{extract.song_label(self.game, sid)}  ({kind})")
             self.song_ids.append(sid)
@@ -297,7 +299,7 @@ class ExtractTab(QWidget):
         self.lb_info.setText(extract.summary(self.game))
         self.log.clear()
         for w in self.game.warnings:
-            self.log.appendPlainText("Aviso: " + w)
+            self.log.appendPlainText(tr("Aviso: ") + w)
 
     def run(self):
         if self.job is not None:
@@ -309,7 +311,7 @@ class ExtractTab(QWidget):
         sel = sorted(self.song_ids[i.row()] for i in self.ls_songs.selectedIndexes())
         mp = extract.platform(self.game) == "Direto"
         if (self.ck_midi.isChecked() or mp) and not sel:
-            QMessageBox.information(self, "Extração", "Selecione ao menos uma música.")
+            QMessageBox.information(self, tr("Extração"), tr("Selecione ao menos uma música."))
             return
         out = self.ed_out.text().strip() or str(Path.home() / "Desktop" / "Audio_extraido")
         self.qs.setValue("extract/out", out)
@@ -354,7 +356,7 @@ class ExtractTab(QWidget):
         if dlg.exec():
             self.qs.setValue(self._sfx_key(), json.dumps(
                 {str(c): [list(p), list(f)] for c, (p, f) in dlg.result_channels().items()}))
-            self.log.appendPlainText("Canais dos efeitos salvos para " + self.game.name + ".")
+            self.log.appendPlainText(tr("Canais dos efeitos salvos para ") + self.game.name + ".")
 
     # ------------------------------------------------------------- opções do Neo Geo
     def _neo_options(self) -> dict:
@@ -373,7 +375,7 @@ class ExtractTab(QWidget):
         dlg = NeoOptionsDialog(self._neo_options(), self.game.neo_options(), self)
         if dlg.exec():
             self.qs.setValue("extract/neo_options", json.dumps(dlg.result_options()))
-            self.log.appendPlainText("Opções do Neo Geo salvas.")
+            self.log.appendPlainText(tr("Opções do Neo Geo salvas."))
 
     def _done(self, base):
         self.job = None
@@ -400,18 +402,18 @@ class ExtractTab(QWidget):
             for f in sorted(glob.glob(os.path.join(base, "musicas", "*.xgm")) + glob.glob(os.path.join(base, "efeitos", "*.c"))
                             + glob.glob(os.path.join(base, "vozes", "*.wav"))):
                 self.ls_out.addItem(os.path.relpath(f, base))
-            self.lb_out.setText(f"{n_m} música(s) em XGM/VGM, {n_e} efeito(s) com código C e {n_v} voz(es) em WAV em {base}\n"
-                                "Já estão prontos para o Mega Drive: não precisam passar pela aba Conversão.")
+            self.lb_out.setText(tr("{0} música(s) em XGM/VGM, {1} efeito(s) com código C e {2} voz(es) em WAV em {3}\nJá estão "
+                                   "prontos para o Mega Drive: não precisam passar pela aba Conversão.").format(n_m, n_e, n_v, base))
             return
         for m in o.midis:
             self.ls_out.addItem(os.path.basename(m))
         if o.midis:
             self.ls_out.setCurrentRow(0)
             self.bt_send.setEnabled(bool(self.open_in_converter))
-        info = f"{len(o.midis)} MIDI(s) em {base}"
-        info += f"\nSoundFont: {os.path.basename(o.sf2)}" if o.sf2 else "\nSem SoundFont: marque “SoundFont (.sf2)”."
+        info = tr("{0} MIDI(s) em {1}").format(len(o.midis), base)
+        info += tr("\nSoundFont: {0}").format(os.path.basename(o.sf2)) if o.sf2 else tr("\nSem SoundFont: marque “SoundFont (.sf2)”.")
         if o.library:
-            info += "\nBiblioteca de patches FM do jogo: vai junto para a conversão."
+            info += tr("\nBiblioteca de patches FM do jogo: vai junto para a conversão.")
         self.lb_out.setText(info)
 
     def send_to_converter(self):
@@ -420,7 +422,7 @@ class ExtractTab(QWidget):
         if not o or row < 0 or row >= len(o.midis) or not self.open_in_converter:
             return
         if not o.sf2:
-            QMessageBox.information(self, "Extração", "Gere também o SoundFont (.sf2) para converter.")
+            QMessageBox.information(self, tr("Extração"), tr("Gere também o SoundFont (.sf2) para converter."))
             return
         self.open_in_converter(o.midis[row], o.sf2, o.library)
 
@@ -440,19 +442,19 @@ class SfxChannelsDialog(QDialog):
     def __init__(self, game, channels: dict, parent=None):
         super().__init__(parent)
         self.game = game
-        self.setWindowTitle(f"Canais dos efeitos — {game.name}")
+        self.setWindowTitle(tr("Canais dos efeitos — {0}").format(game.name))
         self.resize(900, 420)
         v = QVBoxLayout(self)
-        tip = QLabel("Cada efeito toca só nos canais marcados. Tons que cabem no PSG usam os tons do PSG "
+        tip = QLabel(tr("Cada efeito toca só nos canais marcados. Tons que cabem no PSG usam os tons do PSG "
                      "marcados; o que não couber (ou se nenhum tom do PSG estiver marcado) vai para os FM "
                      "marcados, como onda quadrada. Efeitos que soam ao mesmo tempo no jogo (ex.: pulo e "
                      "tiro) devem ficar em canais diferentes. O ruído sempre usa o 4º canal do PSG. "
-                     "Deixe livres os canais que a música usa (o FM 6 costuma ser o PCM do XGM).")
+                     "Deixe livres os canais que a música usa (o FM 6 costuma ser o PCM do XGM)."))
         tip.setWordWrap(True)
         v.addWidget(tip)
         self.effects = game.effects()
-        heads = (["Efeito"] + [f"PSG {i + 1}" for i in range(self.N_PSG)]
-                 + [f"FM {i + 1}" for i in range(self.N_FM)] + ["Divide canal com"])
+        heads = ([tr("Efeito")] + [tr("PSG {0}").format(i + 1) for i in range(self.N_PSG)]
+                 + [tr("FM {0}").format(i + 1) for i in range(self.N_FM)] + [tr("Divide canal com")])
         self.table = QTableWidget(len(self.effects), len(heads))
         self.conflict_col = len(heads) - 1
         self.table.setHorizontalHeaderLabels(heads)
@@ -483,7 +485,7 @@ class SfxChannelsDialog(QDialog):
             self.table.setItem(row, len(heads) - 1, QTableWidgetItem(""))
         v.addWidget(self.table, 1)
         h = QHBoxLayout()
-        b = QPushButton("Padrão do jogo")
+        b = QPushButton(tr("Padrão do jogo"))
         b.clicked.connect(self.reset)
         h.addWidget(b)
         h.addStretch(1)
@@ -521,7 +523,7 @@ class SfxChannelsDialog(QDialog):
     def _accept(self):
         empty = [f"{cmd:02X} {name}" for cmd, name, _d in self.effects if self.result_channels()[cmd] == ((), ())]
         if empty:
-            QMessageBox.warning(self, self.windowTitle(), "Marque ao menos um canal para:\n" + "\n".join(empty))
+            QMessageBox.warning(self, self.windowTitle(), tr("Marque ao menos um canal para:\n") + "\n".join(empty))
             return
         self.accept()
 
@@ -533,10 +535,10 @@ class NeoOptionsDialog(QDialog):
         super().__init__(parent)
         from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout
         self.default = default
-        self.setWindowTitle("Opções do Neo Geo")
+        self.setWindowTitle(tr("Opções do Neo Geo"))
         v = QVBoxLayout(self)
-        tip = QLabel("As amostras ADPCM do Neo Geo viram PCM do XGM (8 bits, 14 kHz), gravadas dentro de cada "
-                     "música — é o que mais pesa na ROM. O relatório de cada música mostra quantos KB ela usa.")
+        tip = QLabel(tr("As amostras ADPCM do Neo Geo viram PCM do XGM (8 bits, 14 kHz), gravadas dentro de cada "
+                     "música — é o que mais pesa na ROM. O relatório de cada música mostra quantos KB ela usa."))
         tip.setWordWrap(True)
         v.addWidget(tip)
         f = QFormLayout()
@@ -548,29 +550,29 @@ class NeoOptionsDialog(QDialog):
             ck = QCheckBox(f"CH{c}")
             self.ck_ch.append(ck)
             h.addWidget(ck)
-        h.addWidget(QLabel("  (deixe livres os canais das vozes e golpes do jogo)"))
+        h.addWidget(QLabel(tr("  (deixe livres os canais das vozes e golpes do jogo)")))
         h.addStretch(1)
-        f.addRow("Canais PCM da música:", row)
-        self.ck_metal = QCheckBox("Chimbais e pratos no ruído do PSG (economiza PCM e ROM)")
+        f.addRow(tr("Canais PCM da música:"), row)
+        self.ck_metal = QCheckBox(tr("Chimbais e pratos no ruído do PSG (economiza PCM e ROM)"))
         f.addRow(self.ck_metal)
-        self.ck_b = QCheckBox("ADPCM-B (instrumento com altura) no FM 5, com o timbre tirado da amostra")
+        self.ck_b = QCheckBox(tr("ADPCM-B (instrumento com altura) no FM 5, com o timbre tirado da amostra"))
         f.addRow(self.ck_b)
         self.sp_len = QDoubleSpinBox()
         self.sp_len.setRange(0.1, 3.0)
         self.sp_len.setSingleStep(0.1)
         self.sp_len.setSuffix(" s")
-        f.addRow("Duração máxima de cada amostra:", self.sp_len)
+        f.addRow(tr("Duração máxima de cada amostra:"), self.sp_len)
         self.cb_step = QComboBox()
-        for txt, val in (("3 dB (mais variações, mais ROM)", 3.0), ("6 dB", 6.0), ("12 dB (menos ROM)", 12.0)):
+        for txt, val in ((tr("3 dB (mais variações, mais ROM)"), 3.0), (tr("6 dB"), 6.0), (tr("12 dB (menos ROM)"), 12.0)):
             self.cb_step.addItem(txt, val)
-        f.addRow("Volume gravado na amostra, em passos de:", self.cb_step)
+        f.addRow(tr("Volume gravado na amostra, em passos de:"), self.cb_step)
         self.sp_min = QDoubleSpinBox()
         self.sp_min.setRange(-40, 0)
-        self.sp_min.setSuffix(" dB")
-        f.addRow("Notas mais baixas que (ecos) ficam de fora:", self.sp_min)
+        self.sp_min.setSuffix(tr(" dB"))
+        f.addRow(tr("Notas mais baixas que (ecos) ficam de fora:"), self.sp_min)
         v.addLayout(f)
         hb = QHBoxLayout()
-        b = QPushButton("Padrão")
+        b = QPushButton(tr("Padrão"))
         b.clicked.connect(lambda: self._set(self.default))
         hb.addWidget(b)
         hb.addStretch(1)
@@ -598,6 +600,6 @@ class NeoOptionsDialog(QDialog):
 
     def _accept(self):
         if not any(ck.isChecked() for ck in self.ck_ch):
-            QMessageBox.warning(self, self.windowTitle(), "Marque ao menos um canal PCM para a música.")
+            QMessageBox.warning(self, self.windowTitle(), tr("Marque ao menos um canal PCM para a música."))
             return
         self.accept()

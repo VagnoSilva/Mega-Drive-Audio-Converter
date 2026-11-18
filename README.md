@@ -1,7 +1,10 @@
 # Mega Drive Audio Converter — versão 0.11.2
 
+*Read in English: [README.en.md](README.en.md)*
+
 Conversor de músicas (MIDI + SoundFont) para o som do Mega Drive (YM2612 + SN76489 + PCM),
-com exportação XGM v1 (SGDK), VGM e Furnace.
+com exportação XGM v1 (SGDK), VGM e Furnace. Interface em português e inglês (Ajuda → Idioma /
+Language).
 
 A janela tem duas abas:
 - **Extração** — tira MIDI + SoundFont direto da ROM: arcades **Capcom CPS1** (.zip do MAME) e
@@ -32,6 +35,11 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 ## Histórico de versões
 
 **0.11.2**
+- **Interface em inglês**: menu Ajuda → Idioma / Language (Português ou English; na primeira vez
+  segue o idioma do Windows; vale ao reabrir). Os textos da janela passam por `tr()`
+  (`mdconv/i18n.py`) e a tradução fica em `mdconv/i18n_en.py`; o registro, os relatórios e as
+  mensagens de erro do conversor continuam em português. Manual em inglês
+  (`Manual_Mega_Drive_Audio_Converter_EN.pdf`) e `README.en.md`.
 - Furnace (.fur) a partir de MIDI: a velocidade e o "virtual tempo" passam a ficar dentro dos
   limites do Furnace (1–255) com qualquer resolução do MIDI. Antes, num MIDI de 480 ticks por
   semínima o virtual tempo saía 3400/150 e o .fur não tocava na velocidade do XGM/VGM.

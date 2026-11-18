@@ -75,6 +75,7 @@ class Plan:
     fm_overload: float           # fração do tempo com demanda FM > capacidade
     psg_overload: float
     log: list[str] = field(default_factory=list)
+    psg_channels: list[int] = field(default_factory=lambda: [1, 2, 3])   # tons do PSG liberados (1..3)
 
     def part(self, track: int, channel: int) -> PartPlan:
         return next(p for p in self.parts if p.track == track and p.channel == channel)
@@ -137,8 +138,12 @@ def _demand(notes: list[Note], frames: int, fps: float = 60.0) -> np.ndarray:
 
 
 def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
-              use_pcm: bool = True, overload_target: float = 0.02) -> Plan:
+              use_pcm: bool = True, overload_target: float = 0.02,
+              psg_channels: list[int] | None = None) -> Plan:
+    """``psg_channels``: tons do PSG (1–3) que a música pode usar. Os desmarcados ficam mudos
+    (ou livres para efeitos do jogo); sem nenhum, nada vai para o PSG de tom."""
     pcm_channels = [1, 2] if pcm_channels is None else pcm_channels
+    psg_channels = [1, 2, 3] if psg_channels is None else sorted({c for c in psg_channels if 1 <= c <= 3})
     matches = match_instruments(song, sf)
     kind_of = {}
     name_of = {}
@@ -190,7 +195,9 @@ def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
         if p.kind.startswith("kit"):
             p.role, p.priority = "bateria", 80
             p.pool = "PCM" if use_pcm and pcm_channels else "PSG"
-            p.reasons.append("kit de bateria → PCM" if p.pool == "PCM" else "kit → PSG (PCM desligado)")
+            p.reasons.append("kit de bateria → PCM" if p.pool == "PCM" else
+                             "kit → PSG (PCM desligado)" if psg_channels else
+                             "kit sem destino: PCM e PSG de tom desligados (só as peças no ruído tocam)")
         elif p.key in echoes:
             e = echoes[p.key]
             p.echo = e
@@ -200,6 +207,8 @@ def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
                              f"{e.match:.0%} das notas)")
         elif p.role == "harmonia":
             p.priority = int(40 + 25 * min(p.active, 1) + 10 * p.volume / 127)
+        if not psg_channels:
+            continue
         if p.kind.startswith("CGB") and PSG_MIN_KEY <= p.key_min and p.key_max <= PSG_MAX_KEY:
             p.pool = "PSG"
             p.reasons.append("instrumento quadrado do Game Boy → PSG")
@@ -208,7 +217,7 @@ def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
             p.reasons.append("eco → PSG (libera FM para as linhas principais)")
 
     fm_cap = 5 if any(p.pool == "PCM" for p in parts) else 6
-    psg_cap = 3
+    psg_cap = len(psg_channels)
     frames = int(np.ceil(song.length_s * 60)) + 1
     # Partes FM podem transbordar para o PSG nota a nota (nos picos) quando a maior parte
     # das notas cabe na faixa dele; cada nota é conferida na hora (fora da faixa não vai).
@@ -218,21 +227,24 @@ def make_plan(song: Song, sf: SoundFont, pcm_channels: list[int] | None = None,
         if p.pool == "FM":
             keys = [n.key for n in parts_notes[p.key]]
             inside = sum(PSG_MIN_KEY <= k <= PSG_MAX_KEY for k in keys)
-            p.overflow_psg = bool(keys) and inside / len(keys) >= 0.6
+            p.overflow_psg = bool(keys) and psg_cap > 0 and inside / len(keys) >= 0.6
     ess = [n for p in parts if p.pool in ("FM",) and p.role != "eco" for n in parts_notes[p.key]]
     d = _demand(ess, frames)
     psg_fixed = _demand([n for p in parts if p.pool == "PSG" for n in parts_notes[p.key]], frames)
     fm_ov = float(np.mean(d > fm_cap))
     both_ov = float(np.mean(d + psg_fixed > fm_cap + psg_cap))
     psg_ov = float(np.mean(psg_fixed > psg_cap))
-    log.append(f"capacidade: {fm_cap} FM, {psg_cap} PSG tom, 1 ruído, "
+    psg_txt = (f"{psg_cap} PSG tom ({', '.join(f'PSG{c}' for c in psg_channels)})" if psg_cap
+               else "PSG de tom desligado")
+    log.append(f"capacidade: {fm_cap} FM, {psg_txt}, 1 ruído, "
                f"PCM {pcm_channels if use_pcm else '—'}")
     log.append(f"demanda das partes essenciais (sem ecos): acima de {fm_cap} FM em {fm_ov:.1%} do "
                f"tempo; acima de FM+PSG ({fm_cap + psg_cap}) em {both_ov:.1%}")
     log.append("estratégia: nota a nota — FM com o patch aprovado quando houver canal; nos picos, "
                "a nota de menor prioridade vai para o PSG (se couber na faixa); se nem assim couber, "
                "a de menor prioridade é encurtada/omitida e registrada")
-    return Plan(parts, fm_cap, psg_cap, pcm_channels if use_pcm else [], fm_ov, psg_ov, log)
+    return Plan(parts, fm_cap, psg_cap, pcm_channels if use_pcm else [], fm_ov, psg_ov, log,
+                psg_channels=list(psg_channels))
 
 
 def plan_text(plan: Plan) -> str:

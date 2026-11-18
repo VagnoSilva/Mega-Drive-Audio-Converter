@@ -47,6 +47,7 @@ class ProjectSettings:
     name: str = ""                     # nome base dos arquivos (padrão: nome do MIDI)
     use_pcm: bool = True
     pcm_channels: list[int] = field(default_factory=lambda: [1, 2])
+    psg_channels: list[int] = field(default_factory=lambda: [1, 2, 3])   # tons do PSG da música
     vibrato: bool = True
     noise_metals: bool = False         # chimbais/pratos no ruído do PSG (libera o PCM)
     fm_alloc: str = "auto"             # canais FM: auto | dinamico (nota a nota) | fixo (por parte)
@@ -92,10 +93,12 @@ class ProjectSettings:
         errs = []
         if not self.midi or not Path(self.midi).is_file():
             errs.append("escolha o arquivo MIDI")
-        if not self.sf2 or not Path(self.sf2).is_file():
-            errs.append("escolha o arquivo SF2")
+        if self.sf2 and not Path(self.sf2).is_file():
+            errs.append("o arquivo SF2 não existe (deixe vazio para usar o banco General MIDI padrão)")
         if self.use_pcm and not self.pcm_channels:
             errs.append("marque ao menos um canal PCM para a bateria (ou desligue o PCM)")
+        if any(c not in (1, 2, 3) for c in self.psg_channels):
+            errs.append("canais PSG de tom vão de 1 a 3")
         if any(c not in (1, 2, 3, 4) for c in self.pcm_channels):
             errs.append("canais PCM vão de 1 a 4")
         if self.loop_mode not in ("auto", "markers", "none"):
@@ -165,6 +168,7 @@ class Project:
         self.settings = settings
         self.song = None
         self.sf = None
+        self.sf_notice: str | None = None   # mensagem sobre o SoundFont (sem SF2 / kit trocado)
         self.plan: Plan | None = None
         self._conversion = None
         self._conv_key = None
@@ -202,11 +206,18 @@ class Project:
         self.song = self._raw_song
         self._trim_on = False
         self._apply_trim(adjust_loop=False)    # o loop salvo já está na régua da música cortada
-        progress(f"Lendo {Path(self.settings.sf2).name}…")
-        self.sf = read_sf2(self.settings.sf2)
+        from mdconv.io_sf2.gm import prepare
+        sf = None
+        if self.settings.sf2:
+            progress(f"Lendo {Path(self.settings.sf2).name}…")
+            sf = read_sf2(self.settings.sf2)
+        else:
+            progress("Sem SoundFont: usando o banco General MIDI padrão…")
+        # SF2 ausente → banco General MIDI padrão; kit de bateria incompatível → kit padrão.
+        self.sf, sf_notes, self.sf_notice = prepare(self.song, sf)
         self.invalidate()
         self.replan()
-        return list(self.song.warnings)
+        return list(self.song.warnings) + sf_notes
 
     def _need(self):
         if self.song is None or self.sf is None:
@@ -240,7 +251,7 @@ class Project:
             self._apply_trim()
         s = self.settings
         self.plan = make_plan(self.song, self.sf, pcm_channels=s.pcm_channels if s.use_pcm else [],
-                              use_pcm=s.use_pcm)
+                              use_pcm=s.use_pcm, psg_channels=s.psg_channels)
         self.invalidate()
         return self.plan
 
@@ -363,20 +374,36 @@ class Project:
         except (ValueError, OSError):
             return {}
 
-    def _candidates_from(self, rep: dict, key) -> list[Candidate]:
+    def _current_fit(self, rep: dict, key) -> dict | None:
+        """Entrada dos candidatos deste instrumento gerada com o SoundFont atual.
+
+        A pasta ajustes_fm sobrevive à troca de SoundFont: o mesmo banco:programa pode ter
+        candidatos de outro SF2 (outro preset). Só valem os do preset de agora — os antigos
+        gravariam na biblioteca um patch com o nome do preset errado, que nunca aparece
+        como aprovado. Se houver mais de uma, vale a mais recente."""
+        from mdconv.io_sf2.resolve import find_preset
+        pr = find_preset(self.sf, key[0], key[1]).preset if self.sf is not None else None
+        name = pr.name.strip() if pr is not None else None
+        found = None
         for e in rep.get("instruments", []):
-            if (e["bank"], e["program"]) == tuple(key):
-                out = []
-                for c in e["candidates"]:
-                    p = c["patch"]
-                    stage = c.get("stage", "")
-                    origin = stage if stage.startswith(("banco", "biblioteca")) else "busca do zero"
-                    out.append(Candidate(
-                        c["rank"], self.fit_dir / c["wav"], c["cost_total"],
-                        f"{origin} · alg {p['alg']} · fb {p['fb']} · MUL {[o['mul'] for o in p['ops']]} · "
-                        f"custo {c['cost_total']:.2f}", bool(c.get("approved")),
-                        bool(c.get("rejected")), stage or origin))
-                return out
+            if (e["bank"], e["program"]) == tuple(key) and (e.get("preset") or "").strip() == name:
+                found = e
+        return found
+
+    def _candidates_from(self, rep: dict, key) -> list[Candidate]:
+        e = self._current_fit(rep, key)
+        if e is not None:
+            out = []
+            for c in e["candidates"]:
+                p = c["patch"]
+                stage = c.get("stage", "")
+                origin = stage if stage.startswith(("banco", "biblioteca")) else "busca do zero"
+                out.append(Candidate(
+                    c["rank"], self.fit_dir / c["wav"], c["cost_total"],
+                    f"{origin} · alg {p['alg']} · fb {p['fb']} · MUL {[o['mul'] for o in p['ops']]} · "
+                    f"custo {c['cost_total']:.2f}", bool(c.get("approved")),
+                    bool(c.get("rejected")), stage or origin))
+            return out
         return []
 
     def candidates(self, key) -> list[Candidate]:
@@ -416,10 +443,10 @@ class Project:
     def approve(self, key: tuple[int, int], rank: int, auto: bool = False) -> dict:
         from mdconv.fm.instrument_fit import approve
         self._need()
-        rep = self._fit_report()
-        e = next((e for e in rep.get("instruments", []) if (e["bank"], e["program"]) == tuple(key)), None)
+        e = self._fit_entry(key)
         if e is None:
-            raise ValueError("gere os candidatos deste instrumento antes de aprovar")
+            raise ValueError("gere os candidatos deste instrumento antes de aprovar (os que existiam "
+                             "foram gerados com outro SoundFont)")
         r = approve(self.fit_dir, e["label"], rank, self.sf, self.library_dir,
                     extra_source={"auto": True} if auto else None)
         self._decision("rascunho_auto" if auto else "aprovado", key, rank)
@@ -470,10 +497,7 @@ class Project:
         self._decision("ouviu", key, rank)
 
     def _fit_entry(self, key):
-        for e in self._fit_report().get("instruments", []):
-            if (e["bank"], e["program"]) == tuple(key):
-                return e
-        return None
+        return self._current_fit(self._fit_report(), key)
 
     def _decision(self, event: str, key, rank: int | None = None) -> None:
         """Grava a decisão com o contexto que permite aprender com ela depois."""
@@ -493,7 +517,7 @@ class Project:
                         "custo_envelope": x.get("cost_envelope_db"),
                         "recusado": bool(x.get("rejected")), "aprovado": bool(x.get("approved"))}
             record(event,
-                   musica=Path(self.settings.midi).name, sf2=Path(self.settings.sf2).name,
+                   musica=Path(self.settings.midi).name, sf2=Path(self.settings.sf2).name if self.settings.sf2 else "(General MIDI padrão)",
                    instrumento={"banco": key[0], "programa": key[1], "preset": e.get("preset"),
                                 "tipo": e.get("kind"), "papeis": sorted(set(roles)),
                                 "notas": e.get("keys"), "velocity": e.get("velocity")},
@@ -580,7 +604,7 @@ class Project:
     # ---------------------------------------------------------------- conversão
     def _key(self):
         s = self.settings
-        return (tuple(s.pcm_channels), s.use_pcm, s.vibrato, s.noise_metals, s.fm_alloc, s.snap_tempo,
+        return (tuple(s.pcm_channels), tuple(s.psg_channels), s.use_pcm, s.vibrato, s.noise_metals, s.fm_alloc, s.snap_tempo,
                 s.trim_start, self.trim_ticks,
                 s.fm_att_db, s.loop_mode,
                 s.loop_start_tick, s.loop_end_tick, self._library_stamp(),
@@ -606,7 +630,7 @@ class Project:
                     fm_att_db=s.fm_att_db or 0.0, loop_mode=s.loop_mode,
                     loop_start_tick=s.loop_start_tick, loop_end_tick=s.loop_end_tick,
                     noise_metals=s.noise_metals, fm_alloc=s.fm_alloc, snap_tempo=s.snap_tempo,
-                    pinned=s.pinned_patches)
+                    pinned=s.pinned_patches, psg_channels=s.psg_channels)
         self.plan = c.plan
         self._conversion, self._conv_key = c, key
         return c

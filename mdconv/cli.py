@@ -8,6 +8,8 @@
     python -m mdconv.cli preview musica.mid banco.sf2 saida.wav [--library pasta] [--pcm-channels 1,2]
     python -m mdconv.cli import-tfi pasta_tfi [--bank banco_tfi]
     python -m mdconv.cli export musica.mid banco.sf2 pasta_saida [--format xgm,vgm] [--wav]
+
+No lugar de banco.sf2, ``gm`` usa o banco General MIDI padrão do programa (MIDI sem SoundFont).
 """
 from __future__ import annotations
 
@@ -38,6 +40,24 @@ def _finite(o):
     return o
 
 
+def _soundfont(path, song):
+    """SF2 da linha de comando. ``gm`` (ou ``-``) = banco General MIDI padrão do programa.
+    O kit de bateria incompatível com um MIDI General MIDI é trocado pelo padrão."""
+    from mdconv.io_sf2.gm import prepare
+    sf = None if str(path).lower() in ("gm", "-", "") else read_sf2(path)
+    sf, notes, _ = prepare(song, sf)
+    for n in notes:
+        print(f"⚠ {n}", file=sys.stderr)
+    return sf
+
+
+def _sf_plain(path):
+    if str(path).lower() in ("gm", "-", ""):
+        from mdconv.io_sf2.gm import default_soundfont
+        return default_soundfont()
+    return read_sf2(path)
+
+
 def _is_ripper(song) -> bool:
     return any("SequenceRipper" in t.text or "Mus Rip" in t.text for t in song.texts)
 
@@ -47,7 +67,7 @@ def cmd_analyze(args) -> int:
     stats = analyze_song(song)
     sf_sum = matches = None
     if args.sf2:
-        sf = read_sf2(args.sf2)
+        sf = _soundfont(args.sf2, song)
         sf_sum = sf2_summary(sf)
         matches = match_instruments(song, sf)
     print(to_text(stats, sf_sum, matches))
@@ -60,7 +80,7 @@ def cmd_analyze(args) -> int:
 def cmd_render_song(args) -> int:
     from mdconv.reference.sampler import RenderOptions, render_song, write_wav
     song = load_song(args.midi)
-    sf = read_sf2(args.sf2)
+    sf = _soundfont(args.sf2, song)
     opt = RenderOptions(sample_rate=args.rate, interp=args.interp, law=args.law,
                         vibrato=not args.no_vibrato, gm_drum_channel=not _is_ripper(song))
     solo = {int(c) - 1 for c in args.solo.split(",")} if args.solo else None
@@ -80,7 +100,7 @@ def cmd_render_song(args) -> int:
 def cmd_render_instruments(args) -> int:
     from mdconv.reference.instruments import render_instruments, summary_text
     song = load_song(args.midi)
-    sf = read_sf2(args.sf2)
+    sf = _soundfont(args.sf2, song)
     out = Path(args.out_dir)
     res = render_instruments(song, sf, out, sr=args.rate, interp=args.interp,
                              gm_drum_channel=not _is_ripper(song))
@@ -102,7 +122,7 @@ def cmd_render_instruments(args) -> int:
 def cmd_fm_fit(args) -> int:
     from mdconv.fm.instrument_fit import fit_song, report_text
     song = load_song(args.midi)
-    sf = read_sf2(args.sf2)
+    sf = _soundfont(args.sf2, song)
     out = Path(args.out_dir)
     progs = {int(p) for p in args.programs.split(",")} if args.programs else None
     bank = None
@@ -120,7 +140,7 @@ def cmd_fm_fit(args) -> int:
 
 def cmd_fm_approve(args) -> int:
     from mdconv.fm.instrument_fit import approve
-    r = approve(Path(args.out_dir), args.label, args.rank, read_sf2(args.sf2), Path(args.library))
+    r = approve(Path(args.out_dir), args.label, args.rank, _sf_plain(args.sf2), Path(args.library))
     p = r["patch"]
     print(f"Aprovado: {r['label']} candidato #{r['rank']} → biblioteca '{r['library_id']}' "
           f"(alg {p['alg']}, fb {p['fb']}, MUL {[o['mul'] for o in p['ops']]})")
@@ -130,7 +150,7 @@ def cmd_fm_approve(args) -> int:
 def _convert(args):
     from mdconv.convert import convert
     song = load_song(args.midi)
-    sf = read_sf2(args.sf2)
+    sf = _soundfont(args.sf2, song)
     pcm = [int(c) for c in args.pcm_channels.split(",")] if args.pcm_channels else [1, 2]
     return song, convert(song, sf, Path(args.library), use_pcm=not args.no_pcm, pcm_channels=pcm,
                          vibrato=not args.no_vibrato,

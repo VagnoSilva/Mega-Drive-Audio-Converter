@@ -124,7 +124,7 @@ def convert(song: Song, sf: SoundFont, library_dir: Path | None, use_pcm: bool =
             loop_mode: str = "auto", loop_start_tick: int | None = None,
             loop_end_tick: int | None = None, noise_metals: bool = False,
             snap_tempo: bool = False, fm_alloc: str = "dinamico",
-            pinned: dict | None = None) -> Conversion:
+            pinned: dict | None = None, psg_channels: list[int] | None = None) -> Conversion:
     """``balance='auto'``: o XGM não tem volume para o PCM, então o equilíbrio bateria × resto
     do original é recuperado abaixando FM e PSG (calculado comparando os grupos de partes
     no original e na conversão). ``balance='manual'`` usa ``fm_att_db``.
@@ -141,7 +141,7 @@ def convert(song: Song, sf: SoundFont, library_dir: Path | None, use_pcm: bool =
         from mdconv.arrange.tempo_grid import snap_tempo as _snap
         song, grid = _snap(song)
     loop = resolve_loop(song, loop_mode, loop_start_tick, loop_end_tick)
-    plan = make_plan(song, sf, pcm_channels=pcm_channels, use_pcm=use_pcm)
+    plan = make_plan(song, sf, pcm_channels=pcm_channels, use_pcm=use_pcm, psg_channels=psg_channels)
     patches = approved_patches(library_dir, sf)
     apply_pinned(patches, pinned, sf)
     missing = []

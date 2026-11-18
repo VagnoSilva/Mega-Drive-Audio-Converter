@@ -189,6 +189,10 @@ class MainWindow(QMainWindow):
             f.addRow(label, _path_row(ed, b))
         self.ed_bank.setToolTip("Pasta criada por 'import-tfi' (patches .tfi de jogos e packs). "
                                 "Opcional: dá candidatos extras a partir de patches prontos.")
+        self.ed_sf2.setPlaceholderText("vazio = banco General MIDI padrão (para MIDIs sem SoundFont)")
+        self.ed_sf2.setToolTip("O SoundFont do jogo (aba Extração ou GBA Mus Ripper). Para um MIDI comum, "
+                               "sem SoundFont, deixe vazio: os instrumentos e a bateria vêm do banco "
+                               "General MIDI padrão do programa.")
         self.ed_library.setToolTip("Patches aprovados ficam aqui e servem para todas as músicas "
                                    "que usam o mesmo instrumento do SF2.")
         self.bt_load = QPushButton("Abrir música")
@@ -293,6 +297,17 @@ class MainWindow(QMainWindow):
             self.ck_pcm_ch.append(ck)
             h.addWidget(ck)
         h.addWidget(QLabel("  (os canais não marcados ficam livres para os efeitos do jogo)"))
+        psg_row = QWidget()
+        hp = QHBoxLayout(psg_row)
+        hp.setContentsMargins(0, 0, 0, 0)
+        self.ck_psg_ch = []
+        for c in (1, 2, 3):
+            ck = QCheckBox(f"PSG{c}")
+            ck.setToolTip("Desmarque para a música não usar este tom do PSG. As notas que iriam para ele\n"
+                          "ficam no FM (ou vão para outro PSG marcado); o que não couber aparece no relatório.")
+            self.ck_psg_ch.append(ck)
+            hp.addWidget(ck)
+        hp.addWidget(QLabel("  (desmarque se o PSG chiar; os desmarcados ficam mudos ou livres para o jogo)"))
         h.addStretch(1)
         self.ck_vibrato = QCheckBox("Vibrato (modulação do m4a)")
         self.cb_alloc = QComboBox()
@@ -335,6 +350,7 @@ class MainWindow(QMainWindow):
         hb.addStretch(1)
         fl.addRow(self.ck_pcm)
         fl.addRow("Canais PCM da música:", pcm_row)
+        fl.addRow("Canais PSG de tom:", psg_row)
         fl.addRow("Canais FM:", self.cb_alloc)
         fl.addRow(self.ck_grid)
         fl.addRow(self.ck_trim)
@@ -480,6 +496,8 @@ class MainWindow(QMainWindow):
         self.ck_pcm.setChecked(s.use_pcm)
         for c, ck in enumerate(self.ck_pcm_ch, 1):
             ck.setChecked(c in s.pcm_channels)
+        for c, ck in enumerate(self.ck_psg_ch, 1):
+            ck.setChecked(c in s.psg_channels)
         self.ck_vibrato.setChecked(s.vibrato)
         self.ck_noise.setChecked(s.noise_metals)
         self.cb_alloc.setCurrentIndex(max(0, self.cb_alloc.findData(s.fm_alloc)))
@@ -507,6 +525,7 @@ class MainWindow(QMainWindow):
         s.bank = self.ed_bank.text().strip()
         s.use_pcm = self.ck_pcm.isChecked()
         s.pcm_channels = [c for c, ck in enumerate(self.ck_pcm_ch, 1) if ck.isChecked()]
+        s.psg_channels = [c for c, ck in enumerate(self.ck_psg_ch, 1) if ck.isChecked()]
         s.vibrato = self.ck_vibrato.isChecked()
         s.noise_metals = self.ck_noise.isChecked()
         s.fm_alloc = self.cb_alloc.currentData()
@@ -706,6 +725,8 @@ class MainWindow(QMainWindow):
                   + (f"; {n_pin} com patch travado no projeto." if n_pin else "."))
         if n_pin:
             self._offer_pin_update(on_open=True)
+        if project.sf_notice:
+            QMessageBox.information(self, "SoundFont", project.sf_notice)
 
     # ------------------------------------------------------------- patches travados
     def _offer_pin_update(self, on_open: bool = False) -> bool:
@@ -1211,6 +1232,8 @@ class MainWindow(QMainWindow):
                           "ou do GBA Mus Ripper"
                           "<br>• Arcades Capcom <b>CPS1</b> — MIDI + SF2 da aba Extração, com os timbres "
                           "FM originais prontos como biblioteca de patches."
+                          "<br>• <b>MIDI comum</b> (General MIDI), com ou sem SoundFont — sem SF2, "
+                          "usa o banco General MIDI padrão do programa."
                           "<br>• VGM de <b>AY-3-8910</b> (Moon Patrol, MSX, Spectrum…) e <b>YM2203</b> "
                           "(Ghosts 'n Goblins…) — conversão direta chip a chip (menu Ferramentas)."
                           f"<br><br>Aba <b>Extração</b>: extrator de áudio {extract_version} "

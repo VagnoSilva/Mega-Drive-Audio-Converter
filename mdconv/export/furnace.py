@@ -11,13 +11,15 @@ do XGM com a bateria em 2 canais) + "SN76489" (PSG da Sega). Sem PCM: "YM2612" (
 
 Tempo
 -----
-Cada linha do pattern vale ``g`` ticks do MIDI. O Furnace roda a 60 ticks por segundo (NTSC)
-com "virtual tempo" N/D = BPM·PPQ/3600 — com 24 ticks por semínima (GBA) é BPM/150, o mesmo
-acumulador do driver do GBA —, então as notas caem no mesmo quadro em que o jogo as tocaria.
-Com outra resolução (ex.: 48 nos MIDIs da CPS1) o denominador vira 3600/PPQ (75), ou, se não
-for inteiro, D = 150 e N = BPM·PPQ/24. ``g`` é o menor valor que respeita o limite do Furnace
-de uma linha por quadro (N ≤ D·g). Notas
-que caem entre linhas recebem atraso EDxx (em quadros). Mudanças de andamento: FDxx.
+Cada linha do pattern vale ``g`` ticks do MIDI (``g`` divide o PPQ e é o menor valor com no
+máximo uma linha por quadro). Um tick do Furnace vale ``u`` ticks do MIDI (``u`` divide ``g``;
+velocidade = g/u ticks por linha) e o "virtual tempo" N/D faz o Furnace andar exatamente na
+velocidade do MIDI: 60·N/D ticks por segundo = BPM·PPQ/(60·u). N e D são escolhidos
+(``_timing``) dentro dos limites do Furnace — 1 a 255, e o FDxx das mudanças de andamento só
+tem um byte —, de preferência com no máximo um tick por quadro e sem arredondamento. Com 24
+ticks por semínima (GBA) e BPM ≤ 150 isso dá u = 1, D = 150 e N = BPM, o acumulador do driver
+do GBA; com 480 (MIDIs da internet) e 170 BPM, uma linha por tick e N/D = 17/18. Notas que caem entre linhas recebem atraso EDxx e notas mais curtas que uma linha,
+corte ECxx — os dois em ticks do Furnace. Mudanças de andamento: FDxx.
 
 O que vira efeito
 -----------------
@@ -144,6 +146,7 @@ class FurReport:
     merged_pcm: int = 0
     merged_rows: int = 0
     warnings: list[str] = field(default_factory=list)
+    tempo: str = ""
 
     def text(self) -> str:
         L = [f"Furnace 0.6.8.3 (.fur): {self.notes} notas, {self.instruments} instrumentos, "
@@ -152,6 +155,7 @@ class FurReport:
              f"({self.rows_per_beat} linhas por tempo) · padrões de {self.pattern_len} linhas · "
              f"{self.orders} ordens",
              "  canais: " + ", ".join(self.channels),
+             *([f"  andamento: {self.tempo}"] if self.tempo else []),
              ("  loop na linha %d" % self.loop_row) if self.loop_row is not None else "  sem loop"]
         if self.delayed_notes:
             L.append(f"  {self.delayed_notes} nota(s) entre linhas: tocadas no quadro certo com EDxx")
@@ -192,6 +196,31 @@ class _Clock:
 
 
 # ====================================================================== conversão
+def _timing(ppq: int, g: int, bpms: list[float]) -> tuple[int, int, list[int]]:
+    """(u, D, N de cada andamento): u = ticks do MIDI por tick do Furnace (divide ``g``),
+    N/D ≈ BPM·PPQ/(3600·u) para cada BPM, com 1 ≤ N, D ≤ 255.
+
+    Preferência: no máximo 1 tick por quadro (N ≤ D), depois exato, depois o menor erro,
+    depois o menor u (atrasos mais finos), depois D = 150 (o padrão do Furnace) ou o menor D."""
+    best = None
+    for u in (d for d in range(1, g + 1) if g % d == 0):
+        rs = [b * ppq / (3600.0 * u) for b in bpms]
+        rmax = max(rs)
+        if rmax > 2.0 + 1e-9:
+            continue
+        for D in range(1, 256):
+            ns = [max(1, int(round(r * D))) for r in rs]
+            if max(ns) > 255:
+                break
+            err = max(abs(n / D - r) / r for n, r in zip(ns, rs))
+            score = (rmax > 1.0 + 1e-9, err > 1e-6, round(err, 7), u, D != 150, D)
+            if best is None or score < best[0]:
+                best = (score, u, D, ns)
+    if best is None:                       # não acontece: u = g sempre cabe (rmax ≤ 1)
+        raise ValueError("andamento fora do alcance do Furnace")
+    return best[1], best[2], best[3]
+
+
 def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     """Monta o modelo do .fur a partir de uma :class:`~mdconv.convert.Conversion`."""
     song, drv, plan, stream = conv.song, conv.driver, conv.plan, conv.stream
@@ -199,11 +228,6 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
         raise ValueError("a conversão não guardou a linha do tempo do driver")
     clk = _Clock(song)
     ppq = song.ppq
-    # virtual tempo: N/D = BPM·ppq/3600 (com ppq 24: BPM/150, como no driver do GBA)
-    if 3600 % ppq == 0:
-        vt_d, vt_scale = 3600 // ppq, 1.0
-    else:
-        vt_d, vt_scale = 150, ppq / 24.0
     use_pcm = bool(plan.pcm_channels)
     pcm_list = sorted(plan.pcm_channels)
     warnings: list[str] = []
@@ -245,10 +269,14 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     t0 = (min(first_note, loop_tick if loop_tick is not None else first_note) // bar) * bar
     end_tick = loop.end_tick if loop is not None else max(
         clk.tick_at(len(stream.frames) / FPS), max(n.end_tick for n in song.notes))
-    max_bpm = max([clk.bpm(t0)] + [c.bpm for c in clk.changes if t0 < c.tick < end_tick])
-    g = max(1, math.ceil(max_bpm * vt_scale / vt_d - 1e-9))
+    changes = [c for c in clk.changes if t0 < c.tick < end_tick]
+    bpms = [clk.bpm(t0)] + [c.bpm for c in changes]
+    max_bpm = max(bpms)
+    g = max(1, math.ceil(max_bpm * ppq / 3600.0 - 1e-9))     # no máximo uma linha por quadro
     while ppq % g:
         g += 1
+    u, vt_d, vt_ns = _timing(ppq, g, bpms)
+    speed = g // u
     rows_per_beat = ppq // g
     rows_per_bar = bar // g
     pat_len = max(rows_per_bar, (256 // rows_per_bar) * rows_per_bar) if rows_per_bar <= 256 else 256
@@ -264,10 +292,12 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
         return c
 
     def place(tick):
-        """(linha, atraso em quadros) para um tick do MIDI."""
+        """(linha, atraso em ticks do Furnace) para um tick do MIDI."""
         off = tick - t0
         row, rem = divmod(off, g)
-        delay = int(round(rem * vt_d / (clk.bpm(tick) * vt_scale))) if rem else 0
+        delay = int(round(rem / u))
+        if delay >= speed:
+            row, delay = row + 1, 0
         return row, delay
 
     def frame_of_tick(tick):
@@ -437,10 +467,15 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
         erow, edelay = place(et)
         mark = NOTE_RELEASE if typ == "psg" else NOTE_OFF
         if erow <= row:
-            # nota mais curta que uma linha: corta depois de N quadros
-            frames = max(1, frame_of_tick(et) - frame_of_tick(rec["start"]))
-            c.fx[EFF_CUT] = min(255, frames)
-            continue
+            # nota mais curta que uma linha: corta N ticks depois do começo da linha
+            # (ECxx conta, como o EDxx, a partir do início da linha)
+            cut = max(delay + 1, int(round((et - t0 - row * g) / u)))
+            if cut < speed:
+                c.fx[EFF_CUT] = min(255, cut)
+                continue
+            erow, edelay = row + 1, 0          # mais curta que um tick: solta na linha seguinte
+            if erow >= n_rows:
+                continue
         ec = cell(ch, erow)
         if ec.note is None:
             ec.note = mark
@@ -517,7 +552,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     # ---- notas que ainda soam no fim: corta ao final da última linha (como o XGM, que
     # desliga tudo no fim antes de voltar ao loop)
     last_row = n_rows - 1
-    frames_last = max(1, int(round(g * vt_d / (clk.bpm(t0 + last_row * g) * vt_scale))))
+    frames_last = max(0, speed - 1)          # último tick da última linha
     for rec in events:
         if rec["typ"] == "pcm" or "row" not in rec or rec["row"] > last_row:
             continue
@@ -537,20 +572,14 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
 
     # ---- andamento
     tempo_fx = {}
-    for chg in clk.changes:
-        if t0 < chg.tick < end_tick:
-            r, _ = place(chg.tick)
-            N = int(round(chg.bpm * vt_scale))
-            if N > min(255, vt_d * g):
-                N = min(255, vt_d * g)
-                rep.clamped_tempos += 1
-            tempo_fx[r] = N
+    for chg, N in zip(changes, vt_ns[1:]):
+        r, _ = place(chg.tick)
+        tempo_fx[r] = N
     for r, N in tempo_fx.items():
         cell(0, r).fx[EFF_VTEMPO_N] = N
-    vt_n = int(round(clk.bpm(t0) * vt_scale))
-    if vt_n > vt_d * g:
-        vt_n = vt_d * g
-        rep.clamped_tempos += 1
+    vt_n = vt_ns[0]
+    rep.tempo = (f"velocidade {speed}, virtual tempo {vt_n}/{vt_d} "
+                 f"({60 * vt_n / vt_d:.2f} ticks/s; 1 tick = {u} tick(s) do MIDI)")
 
     # ---- padrões, ordens e loop
     loop_row = None
@@ -590,7 +619,7 @@ def build_fur_song(conv, name: str = "", author: str = "", game: str = ""):
     rep.instruments = len(instruments)
     rep.samples = len(samples)
     rep.warnings = warnings
-    meta = {"name": name or "", "author": author, "game": game, "g": g, "t0": t0,
+    meta = {"name": name or "", "author": author, "game": game, "g": g, "speed": speed, "u": u, "t0": t0,
             "rows_per_beat": rows_per_beat, "rows_per_bar": rows_per_bar, "pat_len": pat_len,
             "vt_n": vt_n, "vt_d": vt_d, "use_pcm": use_pcm, "n_ch": n_ch, "ch_names": ch_names}
     return meta, instruments, samples, cells, orders, rep
@@ -839,8 +868,8 @@ def serialize(meta, instruments, samples, cells, orders, compress: bool = True) 
     # ---- INFO
     info = w.block(b"INFO")
     w.c(0)                              # time base
-    w.c(meta["g"])                      # speed 1
-    w.c(meta["g"])                      # speed 2
+    w.c(meta.get("speed", meta["g"]))   # speed 1
+    w.c(meta.get("speed", meta["g"]))   # speed 2
     w.c(1)                              # arp
     w.f(60.0)
     w.s(pat_len)
@@ -909,7 +938,7 @@ def serialize(meta, instruments, samples, cells, orders, compress: bool = True) 
         w.c(0)
     w.c(1)                              # padrão de velocidade: 1 valor
     for k in range(16):
-        w.c(meta["g"] if k == 0 else 0)
+        w.c(meta.get("speed", meta["g"]) if k == 0 else 0)
     w.c(0)                              # grooves
     adir_seek = w.tell()
     w.i(0)

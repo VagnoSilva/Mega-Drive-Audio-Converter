@@ -2,6 +2,31 @@
 
 Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.10.0.
 
+## [0.11.2] — 2026-11-18
+
+### Novidades
+- **MIDI sem SoundFont**: o campo SoundFont da aba Conversão pode ficar vazio. Um MIDI comum (General MIDI)
+  usa o banco General MIDI padrão do programa: kit de bateria com as 47 peças do GM e os 128 instrumentos GM
+  como referência para os patches FM. Na linha de comando, `gm` no lugar do `.sf2`.
+- **Verificação do SoundFont**: num MIDI General MIDI, se o kit de bateria do SF2 não servir (sem banco 128,
+  amostras do Oki de um SF2 extraído da CPS1, peças faltando ou uma amostra só), ele é trocado pelo kit padrão e
+  uma mensagem avisa. Ex.: um MIDI do Street Fighter Alpha com o SF2 do Street Fighter II não toca mais vozes e
+  golpes dos lutadores no lugar da bateria.
+- **Canais PSG de tom no arranjo** (aba Arranjo → "Canais PSG de tom: PSG1 PSG2 PSG3"): desmarque os tons do
+  PSG que a música não deve usar — por exemplo, quando o transbordo para o PSG soa como chiado. As notas ficam no
+  FM ou nos PSG marcados; o que não couber aparece no relatório. Salvo no projeto.
+
+### Correções
+- Furnace (.fur) de MIDIs com resolução alta (ex.: 480 ticks por semínima, comum nos MIDIs da internet): o
+  "virtual tempo" saía fora do limite do Furnace (ex.: 3400/150) e a música não tocava na velocidade do XGM/VGM;
+  mudanças de andamento eram cortadas em FF. Agora velocidade e virtual tempo são escolhidos dentro dos limites
+  (1–255), com no máximo um tick por quadro, e os atrasos (EDxx) e cortes (ECxx) vão em ticks do Furnace.
+- Aprovar um patch depois de trocar o SoundFont (mesma pasta de saída) não marcava o instrumento como aprovado:
+  a aprovação usava os candidatos gerados com o SoundFont anterior. Agora só valem os candidatos do SoundFont
+  atual; os antigos ficam de lado.
+- Desligar todos os canais PSG de tom no arranjo dava o erro "min() iterable argument is empty" quando alguma
+  parte ainda ia para o PSG (ex.: bateria sem PCM). Agora essas notas ficam fora do PSG e o relatório avisa.
+
 ## [0.11.1] — 2026-11-17
 
 ### Novidades

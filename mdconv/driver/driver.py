@@ -302,7 +302,8 @@ class Driver:
         fm = [_Voice("fm", i) for i in range(n_fm)]
         if self.fm_alloc == "fixo":
             self._assign_homes(plan, n_fm)
-        psg = [_Voice("psg", i) for i in range(plan.psg_capacity)]
+        # só os tons do PSG liberados no arranjo (o canal do chip é o mesmo número)
+        psg = [_Voice("psg", c - 1) for c in getattr(plan, "psg_channels", [1, 2, 3])[:plan.psg_capacity]]
         pcm_ch = list(plan.pcm_channels)
         pcm_busy: dict[int, tuple[int, int, int]] = {}  # canal → (fim, prioridade, início)
         total = int(np.ceil(song.length_s * FPS)) + 2
@@ -531,8 +532,8 @@ class Driver:
         return L
 
     def _place_psg(self, w, psg, n, p, f, ef, overflow: bool, migrated: bool = False) -> bool:
-        if not (PSG_MIN_KEY <= n.key <= PSG_MAX_KEY):
-            return False
+        if not psg or not (PSG_MIN_KEY <= n.key <= PSG_MAX_KEY):
+            return False                   # PSG de tom desligado no arranjo, ou nota fora da faixa
         free = [v for v in psg if v.note is None]
         if free:
             v = free[0]

@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — versão 0.11.1
+# Mega Drive Audio Converter — versão 0.11.2
 
 Conversor de músicas (MIDI + SoundFont) para o som do Mega Drive (YM2612 + SN76489 + PCM),
 com exportação XGM v1 (SGDK), VGM e Furnace.
@@ -30,6 +30,29 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 `python -m mdconv.cli --version`).
 
 ## Histórico de versões
+
+**0.11.2**
+- Furnace (.fur) a partir de MIDI: a velocidade e o "virtual tempo" passam a ficar dentro dos
+  limites do Furnace (1–255) com qualquer resolução do MIDI. Antes, num MIDI de 480 ticks por
+  semínima o virtual tempo saía 3400/150 e o .fur não tocava na velocidade do XGM/VGM.
+- **Canais PSG de tom no arranjo**: caixas PSG1, PSG2 e PSG3 na aba Arranjo
+  (`ProjectSettings.psg_channels`). Os tons desmarcados ficam mudos (ou livres para o jogo);
+  sem nenhum, nenhuma parte vai para o PSG de tom nem transborda para ele.
+- **MIDI sem SoundFont**: o campo SoundFont da aba Conversão pode ficar vazio. Um MIDI comum
+  (General MIDI) usa o banco General MIDI padrão do programa (`mdconv/io_sf2/gm.py`, sintetizado na
+  primeira vez em `~/.mdconv/gm_padrao_v1.sf2`): kit de bateria com as 47 peças do GM no banco 128 e
+  os 128 programas GM no banco 0, como formas de onda simples por família (referência para os
+  patches FM, aprovados por programa GM). Na linha de comando, use `gm` no lugar do .sf2.
+- **Verificação do SoundFont**: num MIDI General MIDI, se o kit de bateria do SF2 não servir (sem
+  banco 128, amostras do Oki de um SF2 extraído da CPS1 — bateria misturada com vozes —, peças
+  faltando ou uma amostra só para todas as peças), o kit é trocado pelo kit padrão e uma mensagem
+  avisa; os outros instrumentos continuam vindo do SF2. Se os instrumentos também forem de um jogo
+  extraído, a mensagem sugere deixar o campo vazio. MIDIs da aba Extração e do GBA Mus Ripper não
+  passam pela verificação.
+- Aprovar um patch depois de trocar o SoundFont (mesma pasta de saída) agora marca o instrumento
+  como aprovado: só valem os candidatos gerados com o SoundFont atual.
+- Desligar todos os canais PSG de tom não dá mais erro quando alguma parte ia para o PSG
+  (ex.: bateria sem PCM).
 
 **0.11.1**
 - Menu Arquivo mais enxuto: a conversão de VGM, os efeitos de chip, os efeitos WAV e o banco .tfi

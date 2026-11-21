@@ -168,6 +168,18 @@ class MainWindow(QMainWindow):
         a.setShortcut("Ctrl+T")
         a.triggered.connect(lambda: self.open_tools())
         f.addAction(a)
+        from PySide6.QtGui import QActionGroup
+        from mdconv.export import optimize
+        size = f.addMenu(tr("Tamanho do XGM"))
+        sgrp = QActionGroup(self)
+        for code, name in optimize.MODES.items():
+            act = QAction(tr(name), self, checkable=True)
+            act.setChecked(code == optimize.mode())
+            act.setToolTip(tr(optimize.HINTS[code]))
+            act.triggered.connect(lambda _=False, c=code: self.set_size_mode(c))
+            sgrp.addAction(act)
+            size.addAction(act)
+        size.setToolTipsVisible(True)
         h = self.menuBar().addMenu(tr("A&juda"))
         lang = h.addMenu(tr("Idioma / Language"))
         from PySide6.QtGui import QActionGroup
@@ -182,6 +194,13 @@ class MainWindow(QMainWindow):
         a = QAction(tr("Sobre"), self)
         a.triggered.connect(self.about)
         h.addAction(a)
+
+    def set_size_mode(self, code: str) -> None:
+        """Qualidade × tamanho do XGM/VGM gravado (vale para as próximas exportações)."""
+        from mdconv.export import optimize
+        optimize.set_mode(code)
+        self.qsettings.setValue("export/size_mode", code)
+        self.statusBar().showMessage(tr("Tamanho do XGM: {0}").format(tr(optimize.MODES[code])), 5000)
 
     def set_language(self, code: str) -> None:
         """Grava o idioma escolhido; vale ao reabrir o programa (os textos são lidos quando a
@@ -1157,7 +1176,7 @@ class MainWindow(QMainWindow):
                          work, done)
 
     def convert_vgm_job(self, files, dst, grid=False, trim=True, routing=None, on_done=None,
-                        loop_start=None, loop_end=None, pcm_channel=1):
+                        loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None, style=None):
         """VGM de AY-3-8910 (Moon Patrol, MSX…), YM2203 (Ghosts 'n Goblins…) ou do próprio Mega
         Drive: conversão direta para XGM/VGM/.fur. ``routing``: rotas manuais dos canais do AY;
         ``loop_start``/``loop_end``: loop escolhido à mão (segundos)."""
@@ -1169,7 +1188,8 @@ class MainWindow(QMainWindow):
                 progress(f"▶ {Path(f).name}")
                 try:
                     out += convert_file(f, dst, grid=grid, trim=trim, routing=routing, log=progress,
-                                        loop_start=loop_start, loop_end=loop_end, pcm_channel=pcm_channel)
+                                        loop_start=loop_start, loop_end=loop_end, pcm_channel=pcm_channel,
+                                        opl_routing=opl_routing, style=style)
                 except Exception as exc:              # um arquivo ruim não para o lote
                     bad += 1
                     progress(f"✖ {Path(f).name}: {exc}")

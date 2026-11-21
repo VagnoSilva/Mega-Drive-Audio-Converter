@@ -1,6 +1,7 @@
 """Conversão direta de VGM/VGZ para o Mega Drive, chip a chip (sem MIDI).
 
-Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`), YM2203 / OPN (:mod:`mdconv.opn`) e VGMs que já
+Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`), YM2203 / OPN (:mod:`mdconv.opn`), OPL — YM3526,
+YM3812, Y8950 (:mod:`mdconv.opl`) — e VGMs que já
 são do Mega Drive — YM2612 + SN76489 (:mod:`mdconv.mdvgm`, só reempacota). O chip é
 reconhecido pelo cabeçalho do VGM.
 """
@@ -32,36 +33,49 @@ def detect_chip(path) -> str:
     from mdconv.mdvgm import is_md_vgm
     if is_md_vgm(d):
         return "Mega Drive"
+    from mdconv.opl.convert import detect as opl_detect
+    if opl_detect(d):
+        return opl_detect(d)[0]
     names = {0x0C: "SN76489", 0x10: "YM2413", 0x2C: "YM2612", 0x30: "YM2151", 0x48: "YM2608",
              0x4C: "YM2610", 0x50: "YM3812", 0x98: "OKIM6295", 0xA0: "K054539"}
     found = [n for off, n in names.items() if clk(off)]
     raise ValueError("Chip não suportado na conversão direta"
-                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910, YM2203 e Mega Drive (YM2612 + SN76489).")
+                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910, YM2203, OPL (YM3526, YM3812, Y8950) e Mega Drive "
+                     "(YM2612 + SN76489).")
 
 
 def convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, wav=True, log=print,
-                 trim=True, routing=None, loop_start=None, loop_end=None, pcm_channel=1):
+                 trim=True, routing=None, loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None,
+                 style=None):
     """Converte um VGM/VGZ e grava XGM, VGM, .fur e prévia WAV. Devolve a lista de arquivos.
     ``routing``: rotas manuais dos canais do AY-3-8910 (ver :func:`mdconv.ay.convert.plan_routes`);
     ignoradas nos outros chips. ``loop_start``/``loop_end`` (segundos, contados do começo da música
     convertida): põem ou mudam o loop; ``loop_end`` corta a música ali. ``pcm_channel``: canal PCM
-    do XGM das amostras de um VGM do Mega Drive."""
+    do XGM das amostras de um VGM do Mega Drive. ``style``: (arquivo de referência, opções) — ver
+    :mod:`mdconv.export.restyle`."""
     from mdconv.mdvgm import apply_loop
     path = Path(path)
     chip = detect_chip(path)
-    edit = loop_start is not None or loop_end is not None
+    edit = loop_start is not None or loop_end is not None or bool(style)
     if chip == "XGM":
         stream, report, gd3 = read_xgm_stream(path)
         apply_loop(stream, loop_start, loop_end, report)
-        edited = loop_start is not None or loop_end is not None
-        # o próprio XGM não é regravado, a não ser que o loop tenha mudado
-        return write_outputs(stream, report, gd3, path, out_dir, name, xgm and edited, vgm, wav, log, chip)
+        # o XGM é regravado com a redução de tamanho escolhida (e o loop, se mudou), sem
+        # sobrescrever o original: se cair na mesma pasta, ganha o modo no nome
+        return write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
     if chip == "Mega Drive":
         from mdconv import mdvgm
         src = mdvgm.read_vgm(path)
         stream, report = mdvgm.convert(src, pcm_channel=pcm_channel, trim=trim, loop_start=loop_start,
                                        loop_end=loop_end)
-        return write_outputs(stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip)
+        return write_outputs(stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
+    if chip in ("YM3812", "YM3526", "Y8950"):
+        from mdconv.opl.convert import convert as opl_convert, read_vgm as opl_read
+        src = opl_read(path)
+        conv = opl_convert(src, trim=trim, routing=opl_routing)
+        report = list(conv.report)
+        apply_loop(conv.stream, loop_start, loop_end, report)
+        return write_outputs(conv.stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
     if chip == "YM2203":
         from mdconv.opn.convert import convert, read_vgm
         src = read_vgm(path)
@@ -75,7 +89,7 @@ def convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, 
         conv = convert(src, grid=grid, trim=trim, routing=routing)
     report = list(conv.report)
     apply_loop(conv.stream, loop_start, loop_end, report)
-    return write_outputs(conv.stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip)
+    return write_outputs(conv.stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
 
 
 def read_xgm_stream(path):
@@ -148,17 +162,28 @@ def write_exact_vgm(events, total, loop, path, title="", game="", author="", not
     Path(path).write_bytes(bytes(header + body + gd3))
 
 
-def write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, exact=None, fur=True):
+def write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, exact=None, fur=True,
+                  style=None):
     from mdconv.export.vgm import write_vgm
     from mdconv.export.xgm import write_xgm
     out = Path(out_dir) if out_dir else Path(path).parent
     out.mkdir(parents=True, exist_ok=True)
     stem = name or Path(path).name.split(".")[0]
     files = []
-    for line in report:
+    styled = []
+    if style and style[1]:
+        from mdconv.export.restyle import apply_style, read_style
+        ref = style[0] if hasattr(style[0], "algfb") else read_style(style[0])
+        stream, styled = apply_style(stream, ref, style[1])
+    from mdconv.export.optimize import optimize_stream
+    stream, opt = optimize_stream(stream)
+    for line in list(report) + styled + opt:
         log("  " + line)
     if xgm:
         p = out / f"{stem}.xgm"
+        if p.resolve() == Path(path).resolve():
+            from mdconv.export import optimize
+            p = out / f"{stem}_{optimize.mode()}.xgm"
         write_xgm(stream, p)
         files.append(p)
         log(f"  XGM: {p.name} ({p.stat().st_size} bytes)")

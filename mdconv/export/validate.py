@@ -54,6 +54,8 @@ def export_and_validate(stream: Stream, out_dir: Path, stem: str, formats: set[s
     formato ``fur``, que precisa das notas por canal, não só das escritas nos chips."""
     out_dir = Path(out_dir)
     L: list[str] = []
+    from mdconv.export.optimize import optimize_stream
+    stream, opt = optimize_stream(stream)      # o .fur usa a conversão inteira, não este fluxo
     fps = stream.fps
     unknown = formats - {"xgm", "vgm", "fur"}
     if unknown:
@@ -75,6 +77,7 @@ def export_and_validate(stream: Stream, out_dir: Path, stem: str, formats: set[s
             L.append(f"  {info.filtered_writes} escrita(s) de registrador controlado pelo driver XGM omitida(s) "
                      f"($24–$27, $2A, $2B)")
         L += [f"  ⚠ {w}" for w in info.warnings]
+        L += [f"  {x}" for x in opt]
     if "vgm" in formats:
         p = out_dir / f"{stem}.vgm"
         info = write_vgm(stream, p, title=title, game=game)

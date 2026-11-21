@@ -142,8 +142,8 @@ def test_other_chips_still_rejected(tmp_path):
 
 
 def test_xgm_input_gives_vgm_and_fur(tmp_path):
-    """Um XGM pronto (do SGDK ou de outro programa) → VGM, .fur e prévia; o XGM só é regravado
-    quando o loop muda."""
+    """Um XGM pronto (do SGDK ou de outro programa) → XGM reduzido, VGM, .fur e prévia; o XGM
+    original nunca é sobrescrito."""
     from mdconv.export.xgm import read_xgm, write_xgm
     v = mdvgm.read_vgm(_song(tmp_path))
     st, _ = mdvgm.convert(v, pcm_channel=2)
@@ -152,9 +152,13 @@ def test_xgm_input_gives_vgm_and_fur(tmp_path):
     assert vgmconv.detect_chip(src) == "XGM"
     out = tmp_path / "out"
     files = vgmconv.convert_file(src, out, log=lambda *_: None, wav=False)
-    assert sorted(f.name for f in files) == ["intro.fur", "intro.vgm"]
+    assert sorted(f.name for f in files) == ["intro.fur", "intro.vgm", "intro.xgm"]
     back = mdvgm.read_vgm(out / "intro.vgm")
     assert back.loop is not None and abs(back.total / 44100 - len(st.frames) / 60) < 0.05
     files = vgmconv.convert_file(src, tmp_path / "out2", log=lambda *_: None, wav=False, loop_start=0.5)
     assert "intro.xgm" in [f.name for f in files]
     assert read_xgm((tmp_path / "out2" / "intro.xgm").read_bytes()).loop_frame == 30
+    before = src.read_bytes()
+    files = vgmconv.convert_file(src, log=lambda *_: None, wav=False, vgm=False)   # mesma pasta
+    assert src.read_bytes() == before
+    assert any(f.name.startswith("intro_") and f.suffix == ".xgm" for f in files)

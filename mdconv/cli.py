@@ -206,6 +206,9 @@ def main(argv=None) -> int:
     from mdconv import __version__
     ap = argparse.ArgumentParser(prog="mdconv", description=f"Mega Drive Audio Converter {__version__}")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    ap.add_argument("--xgm-size", choices=["max", "balanced", "compact"], default="balanced",
+                    help="tamanho do XGM/VGM: max = qualidade máxima, balanced = equilibrado (padrão), "
+                         "compact = bem menor (amostras mais curtas e juntadas)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("analyze", help="Analisa MIDI (e SF2, se informado)")
@@ -308,6 +311,8 @@ def main(argv=None) -> int:
     ex.set_defaults(func=cmd_export)
 
     args = ap.parse_args(argv)
+    from mdconv.export import optimize
+    optimize.set_mode(args.xgm_size)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     return args.func(args)

@@ -99,7 +99,7 @@ class ExtractTab(QWidget):
         self.bt_load.clicked.connect(self.load)
         r2.addWidget(self.bt_load)
         self.lb_info = QLabel(tr("{0} jogos CPS1 + jogos de GBA com o motor de som da Nintendo + Irem (Moon Patrol, Kung-Fu "
-                                 "Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98), direto para o "
+                                 "Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98, Garou), direto para o "
                                  "Mega Drive").format(self.cb_game.count() - 1))
         self.lb_info.setStyleSheet("color: #888; margin-left: 12px")
         r2.addWidget(self.lb_info, 1)
@@ -557,6 +557,13 @@ class NeoOptionsDialog(QDialog):
         f.addRow(self.ck_metal)
         self.ck_b = QCheckBox(tr("ADPCM-B (instrumento com altura) no FM 5, com o timbre tirado da amostra"))
         f.addRow(self.ck_b)
+        self.ck_over = QCheckBox(tr("Transbordo para o PSG: nota que sumiria por falta de canal PCM é imitada no PSG"))
+        self.ck_over.setToolTip(tr("Quando o canal PCM está ocupado por uma nota que acabou de começar, a nova vai "
+                                   "para um tom livre do PSG (onda quadrada na nota da amostra; bumbo e tons com a "
+                                   "altura caindo; caixa no ruído, se ele estiver livre). Vozes e efeitos continuam "
+                                   "no PCM. Soa mais simples que a amostra, mas melhor que silêncio — útil com um "
+                                   "canal PCM só."))
+        f.addRow(self.ck_over)
         self.sp_len = QDoubleSpinBox()
         self.sp_len.setRange(0.1, 3.0)
         self.sp_len.setSingleStep(0.1)
@@ -588,6 +595,7 @@ class NeoOptionsDialog(QDialog):
             ck.setChecked(c in o.get("pcm_channels", (1, 2)))
         self.ck_metal.setChecked(bool(o.get("metals_to_noise", True)))
         self.ck_b.setChecked(bool(o.get("adpcm_b_to_fm", True)))
+        self.ck_over.setChecked(bool(o.get("psg_overflow", False)))
         self.sp_len.setValue(float(o.get("max_sample_s", 0.8)))
         self.cb_step.setCurrentIndex(max(0, self.cb_step.findData(float(o.get("volume_step_db", 6.0)))))
         self.sp_min.setValue(float(o.get("min_level_db", -15.0)))
@@ -595,6 +603,7 @@ class NeoOptionsDialog(QDialog):
     def result_options(self) -> dict:
         return dict(pcm_channels=[c for c, ck in enumerate(self.ck_ch, 1) if ck.isChecked()],
                     metals_to_noise=self.ck_metal.isChecked(), adpcm_b_to_fm=self.ck_b.isChecked(),
+                    psg_overflow=self.ck_over.isChecked(),
                     max_sample_s=round(self.sp_len.value(), 2), volume_step_db=float(self.cb_step.currentData()),
                     min_level_db=float(self.sp_min.value()))
 

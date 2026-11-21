@@ -28,6 +28,13 @@ from mdconv.ay.convert import AUTO, CH_NAMES, check_routing, dest_label
 DESTS = ([(tr("Automático"), AUTO)] + [(tr("PSG tom {0}").format(n + 1), ("psg", n)) for n in range(3)]
          + [(tr("FM {0}").format(n + 1), ("fm", n)) for n in range(6)] + [(tr("Omitir (não tocar)"), None)])
 AY_KEYS = [(c, ch) for c in (0, 1) for ch in range(3)]
+OPL_KEYS = [(0, ch) for ch in range(9)] + [(0, "BD"), (0, "TOM")]
+
+
+def _opl_name(key) -> str:
+    ch = key[1]
+    return tr("bumbo (modo bateria)") if ch == "BD" else tr("tom (modo bateria)") if ch == "TOM" \
+        else tr("canal {0}").format(ch + 1)
 
 
 def _dest_to_str(d) -> str:
@@ -115,7 +122,7 @@ class ToolsDialog(QDialog):
         self.resize(760, 640)
         v = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_vgm(), tr("Música VGM (AY / YM2203 / Mega Drive)"))
+        self.tabs.addTab(self._build_vgm(), tr("Música VGM (AY / YM2203 / OPL / Mega Drive)"))
         self.tabs.addTab(self._build_chip_sfx(), tr("Efeitos de chip (AY)"))
         self.tabs.addTab(self._build_wav(), tr("Efeitos e vozes (WAV)"))
         self.tabs.addTab(self._build_tfi(), tr("Banco de patches .tfi"))
@@ -166,9 +173,9 @@ class ToolsDialog(QDialog):
     def _build_vgm(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910, YM2203 ou Mega Drive) ou XGM"))
+        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910, YM2203, OPL ou Mega Drive) ou XGM"))
         gv = QVBoxLayout(g)
-        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910, YM2203 ou Mega Drive, ou XGM do SGDK"), tr("VGM / XGM (*.vgm *.vgz *.xgm)"))
+        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910, YM2203, OPL ou Mega Drive, ou XGM do SGDK"), tr("VGM / XGM (*.vgm *.vgz *.xgm)"))
         gv.addWidget(self.vgm_files)
         v.addWidget(g, 1)
 
@@ -215,15 +222,62 @@ class ToolsDialog(QDialog):
         self.vgm_pcm.setToolTip(tr("Em qual dos 4 canais PCM do XGM vão as amostras do DAC de um VGM do "
                                    "Mega Drive. Os outros ficam livres para os efeitos do jogo."))
         f.addRow(tr("Canal PCM (VGM do Mega Drive):"), self.vgm_pcm)
+        # estilo de uma música de referência (mdconv/export/restyle.py)
+        from mdconv.export.restyle import OPTIONS
+        sr = QWidget()
+        sv = QVBoxLayout(sr)
+        sv.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.style_on = QCheckBox(tr("Copiar de"))
+        self.style_on.setToolTip(tr("Deixa a música com as características técnicas de outra (XGM ou VGM do "
+                                    "Mega Drive): marque abaixo o que copiar. Vale para todos os arquivos da "
+                                    "lista; o original nunca é sobrescrito."))
+        self.style_on.setChecked(self.qsettings.value("tools/style_on", "false") == "true")
+        self.style_ref = QLineEdit(self.qsettings.value("tools/style_ref", "") or "")
+        self.style_ref.setPlaceholderText(tr("XGM ou VGM do Mega Drive de referência"))
+        b = QPushButton(tr("Procurar…"))
+        b.clicked.connect(self._browse_style)
+        self.style_info = QPushButton(tr("Ver"))
+        self.style_info.setToolTip(tr("Mostra o que a referência tem (volume das amostras, algoritmos, LFO)."))
+        self.style_info.clicked.connect(self._show_style)
+        row.addWidget(self.style_on)
+        row.addWidget(self.style_ref, 1)
+        row.addWidget(b)
+        row.addWidget(self.style_info)
+        sv.addLayout(row)
+        row = QHBoxLayout()
+        saved = set((self.qsettings.value("tools/style_opts", "samples,fm_volume,algorithm,lfo") or "").split(","))
+        hints = {
+            "samples": tr("O pico das amostras fica igual ao da referência (um ganho só para todas)."),
+            "fm_volume": tr("Cada instrumento toca sempre no volume mais forte que já usava: somem acentos, "
+                            "ecos e fades."),
+            "algorithm": tr("Algoritmo e feedback de cada canal FM iguais aos da referência. Muda o timbre: "
+                            "os operadores continuam os da música."),
+            "lfo": tr("LFO global e sensibilidade AMS/FMS de cada canal iguais aos da referência."),
+        }
+        self.style_opts = {}
+        for key, label in OPTIONS.items():
+            cb = QCheckBox(tr(label))
+            cb.setChecked(key in saved)
+            cb.setToolTip(hints[key])
+            self.style_opts[key] = cb
+            row.addWidget(cb)
+        row.addStretch(1)
+        sv.addLayout(row)
+        f.addRow(tr("Estilo de referência:"), sr)
         v.addLayout(f)
 
-        g = QGroupBox(tr("Destino de cada canal do AY-3-8910"))
+        g = QGroupBox(tr("Destino de cada canal (AY-3-8910 e OPL)"))
         gv = QVBoxLayout(g)
+        self.route_tabs = QTabWidget()
+        ay_page = QWidget()
+        av = QVBoxLayout(ay_page)
+        av.setContentsMargins(0, 4, 0, 0)
         tip = QLabel(tr("Vale para todos os arquivos da lista (no YM2203, só o SSG passa por aqui e segue o "
                      "automático). \"Automático\": tom que cabe no PSG fica no PSG; parte grave (abaixo de "
                      "~109 Hz) ou do 2º AY vai para o FM como onda quadrada."))
         tip.setWordWrap(True)
-        gv.addWidget(tip)
+        av.addWidget(tip)
         self.route_table = QTableWidget(len(AY_KEYS), 3)
         self.route_table.setHorizontalHeaderLabels([tr("Canal do AY"), tr("Destino"), tr("No automático (1º arquivo)")])
         self.route_table.verticalHeader().setVisible(False)
@@ -246,13 +300,49 @@ class ToolsDialog(QDialog):
             self.route_table.setCellWidget(row, 1, cb)
             self.route_table.setItem(row, 2, QTableWidgetItem("—"))
         self.route_table.setMinimumHeight(self.route_table.verticalHeader().length() + 30)
-        gv.addWidget(self.route_table)
+        av.addWidget(self.route_table)
+        self.route_tabs.addTab(ay_page, "AY-3-8910")
+        # OPL (YM3526 / YM3812 / Y8950): 9 canais + bumbo e tom do modo bateria
+        opl_page = QWidget()
+        ov = QVBoxLayout(opl_page)
+        ov.setContentsMargins(0, 4, 0, 0)
+        tip = QLabel(tr("OPL (YM3526, YM3812, Y8950): \"Automático\" manda as vozes mais importantes e as "
+                        "graves para os 6 canais FM; as que sobram vão para o PSG, como onda quadrada (só se "
+                        "não descerem abaixo de ~110 Hz). Escolha aqui quem fica no FM, quem vai para o PSG "
+                        "e quem não toca."))
+        tip.setWordWrap(True)
+        ov.addWidget(tip)
+        self.opl_table = QTableWidget(len(OPL_KEYS), 3)
+        self.opl_table.setHorizontalHeaderLabels([tr("Canal do OPL"), tr("Destino"), tr("No automático (1º arquivo)")])
+        self.opl_table.verticalHeader().setVisible(False)
+        self.opl_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.opl_table.setSelectionMode(QAbstractItemView.NoSelection)
+        hh = self.opl_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.opl_combos = {}
+        for row, key in enumerate(OPL_KEYS):
+            self.opl_table.setItem(row, 0, QTableWidgetItem(_opl_name(key)))
+            cb = QComboBox()
+            for text, val in DESTS:
+                cb.addItem(text, _dest_to_str(val))
+            saved = self.qsettings.value(f"tools/oplroute_{key[1]}", "auto")
+            cb.setCurrentIndex(max(0, cb.findData(saved)))
+            self.opl_combos[key] = cb
+            self.opl_table.setCellWidget(row, 1, cb)
+            self.opl_table.setItem(row, 2, QTableWidgetItem("—"))
+        self.opl_table.setMinimumHeight(min(320, self.opl_table.verticalHeader().length() + 30))
+        ov.addWidget(self.opl_table)
+        self.route_tabs.addTab(opl_page, "OPL")
+        gv.addWidget(self.route_tabs)
         h = QHBoxLayout()
         b_an = QPushButton(tr("Analisar o 1º arquivo"))
         b_an.setToolTip(tr("Mostra quais canais tocam no 1º arquivo da lista e para onde o automático os mandaria."))
         b_an.clicked.connect(self.analyze_first)
         b_auto = QPushButton(tr("Tudo automático"))
-        b_auto.clicked.connect(lambda: [cb.setCurrentIndex(0) for cb in self.route_combos.values()])
+        b_auto.clicked.connect(lambda: [cb.setCurrentIndex(0) for cb in
+                                        list(self.route_combos.values()) + list(self.opl_combos.values())])
         h.addWidget(b_an)
         h.addWidget(b_auto)
         h.addStretch(1)
@@ -274,6 +364,18 @@ class ToolsDialog(QDialog):
                 r[(c, ch)] = d
         return r
 
+    def opl_routing(self) -> dict:
+        """Rotas do OPL no formato de :func:`mdconv.opl.convert.plan_routes`."""
+        r = {}
+        for key, cb in self.opl_combos.items():
+            self.qsettings.setValue(f"tools/oplroute_{key[1]}", cb.currentData())
+            d = _str_to_dest(cb.currentData())
+            if d is None:
+                r[key] = "omit"
+            elif d != AUTO:
+                r[key] = d
+        return r
+
     def analyze_first(self):
         files = self.vgm_files.files()
         if not files:
@@ -285,6 +387,10 @@ class ToolsDialog(QDialog):
         def work(progress):
             from mdconv.vgmconv import detect_chip
             chip = detect_chip(path)
+            if chip in ("YM3812", "YM3526", "Y8950"):
+                from mdconv.opl.convert import convert as opl_convert, read_vgm as opl_read
+                conv = opl_convert(opl_read(path), trim=trim)
+                return chip, {"opl": {v.key: v.dest for v in conv.voices}}, conv.report
             if chip != "AY-3-8910":
                 return chip, None, []
             from mdconv.ay.convert import convert, read_vgm
@@ -293,6 +399,18 @@ class ToolsDialog(QDialog):
 
         def done(result):
             chip, routes, report = result
+            opl = (routes or {}).get("opl") if isinstance(routes, dict) else None
+            for row, key in enumerate(OPL_KEYS):
+                if opl is None:
+                    txt = tr("({0}: não usa esta tabela)").format(chip)
+                elif key not in opl:
+                    txt = tr("não toca")
+                else:
+                    txt = dest_label(opl[key])
+                self.opl_table.item(row, 2).setText(txt)
+            if opl is not None:
+                self.route_tabs.setCurrentIndex(1)
+                routes = None
             for row, key in enumerate(AY_KEYS):
                 if routes is None:
                     txt = tr("({0}: não usa esta tabela)").format(chip)
@@ -311,7 +429,14 @@ class ToolsDialog(QDialog):
         if not self._need(files, dst):
             return
         routing = self.routing()
+        opl_routing = self.opl_routing()
         errs = check_routing(routing)
+        seen = {}
+        for key, d in opl_routing.items():
+            if d != "omit":
+                if d in seen:
+                    errs.append(tr("OPL {0} e {1} → {2}").format(_opl_name(seen[d]), _opl_name(key), dest_label(d)))
+                seen[d] = key
         if errs:
             QMessageBox.warning(self, self.windowTitle(), tr("Destinos repetidos:\n\n") + "\n".join(errs))
             return
@@ -325,13 +450,55 @@ class ToolsDialog(QDialog):
         self.qsettings.setValue("tools/vgm_loop_a", self.vgm_loop_a.value())
         self.qsettings.setValue("tools/vgm_loop_b", self.vgm_loop_b.value())
         self.qsettings.setValue("tools/vgm_pcm", self.vgm_pcm.value())
+        style = None
+        opts = {k for k, cb in self.style_opts.items() if cb.isChecked()}
+        self.qsettings.setValue("tools/style_on", "true" if self.style_on.isChecked() else "false")
+        self.qsettings.setValue("tools/style_ref", self.style_ref.text().strip())
+        self.qsettings.setValue("tools/style_opts", ",".join(sorted(opts)))
+        if self.style_on.isChecked():
+            ref = self.style_ref.text().strip()
+            if not ref or not Path(ref).is_file():
+                QMessageBox.warning(self, self.windowTitle(), tr("Escolha o arquivo de referência do estilo."))
+                return
+            if not opts:
+                QMessageBox.warning(self, self.windowTitle(), tr("Marque pelo menos uma característica para copiar."))
+                return
+            try:
+                from mdconv.export.restyle import describe, read_style
+                st = read_style(ref)
+            except Exception as exc:
+                QMessageBox.warning(self, self.windowTitle(), str(exc))
+                return
+            self.main._log(tr("Estilo de referência: ") + describe(st))
+            style = (st, opts)
         a, b = self.vgm_loop_a.value(), self.vgm_loop_b.value()
         if loop and b and b <= a:
             QMessageBox.warning(self, self.windowTitle(), tr("O fim do loop tem de vir depois do início."))
             return
         self.main.convert_vgm_job(files, dst, grid=self.vgm_grid.isChecked(), trim=self.vgm_trim.isChecked(),
-                                  routing=routing or None, loop_start=a if loop else None,
-                                  loop_end=(b or None) if loop else None, pcm_channel=self.vgm_pcm.value())
+                                  routing=routing or None, opl_routing=opl_routing or None,
+                                  loop_start=a if loop else None,
+                                  loop_end=(b or None) if loop else None, pcm_channel=self.vgm_pcm.value(),
+                                  style=style)
+
+    def _browse_style(self):
+        start = self.style_ref.text().strip() or self.qsettings.value("ay/dir", "") or str(Path.home())
+        p, _ = QFileDialog.getOpenFileName(self, tr("Música de referência do estilo"), start,
+                                           tr("XGM / VGM (*.xgm *.vgm *.vgz)"))
+        if p:
+            self.style_ref.setText(p)
+            self.style_on.setChecked(True)
+
+    def _show_style(self):
+        ref = self.style_ref.text().strip()
+        if not ref or not Path(ref).is_file():
+            QMessageBox.information(self, self.windowTitle(), tr("Escolha o arquivo de referência do estilo."))
+            return
+        try:
+            from mdconv.export.restyle import describe, read_style
+            QMessageBox.information(self, self.windowTitle(), describe(read_style(ref)))
+        except Exception as exc:
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
 
     # ------------------------------------------------------------- 2. efeitos de chip
     def _build_chip_sfx(self) -> QWidget:

@@ -74,6 +74,19 @@ PROFILES = {
         v=(("242-v1.v1", "242-v1.bin", "kof98_v1.rom"), ("242-v2.v2", "242-v2.bin", "kof98_v2.rom"),
            ("242-v3.v3", "242-v3.bin", "kof98_v3.rom"), ("242-v4.v4", "242-v4.bin", "kof98_v4.rom")),
         music_type=2, names={}),
+    "garou": dict(
+        title="Garou: Mark of the Wolves", short="Garou", board="Neo Geo (Z80 + YM2610)",
+        m1=("253-m1.bin", "253-m1.m1", "garou_m1.rom"),
+        v=(("253-v1.bin", "253-v1.v1", "garou_v1.rom"), ("253-v2.bin", "253-v2.v2", "garou_v2.rom"),
+           ("253-v3.bin", "253-v3.v3", "garou_v3.rom"), ("253-v4.bin", "253-v4.v4", "garou_v4.rom")),
+        music_type=2,
+        # nomes mapeados ouvindo as extrações (temas dos lutadores e faixas da trilha)
+        names={0x23: "Victory Message", 0x25: "Dark Lightning -Emergence-", 0x2C: "Do You Do?",
+               0x30: "Tema de Terry Bogard", 0x31: "Tema de Rock Howard", 0x32: "Tema de Dong Hwan",
+               0x33: "Tema de Kim Jae Hoon", 0x34: "Tema de Hotaru Futaba", 0x35: "Tema de Gato Futaba",
+               0x36: "Tema de B. Jenet", 0x37: "Tema de Marco", 0x38: "Tema de Hokutomaru",
+               0x39: "Tema de Freeman", 0x3A: "Tema de Tizoc", 0x3B: "Tema de Kevin",
+               0x3C: "Tema de Grant", 0x3D: "Tema de Kain", 0x3E: "Sunset Sky Again"}),
 }
 
 # Programa de som "Ver 3.0 by MAKOTO" (KOF 94, KOF 95…): o despacho dos comandos lê o tipo de cada
@@ -577,6 +590,7 @@ class Options:
     volume_step_db: float = 6.0           # variações de volume gravadas na amostra (passos)
     adpcm_b_to_fm: bool = True            # ADPCM-B (instrumento com altura) no FM 5
     min_level_db: float = -15.0           # notas de ADPCM mais baixas que isso (ecos) ficam de fora
+    psg_overflow: bool = False            # nota que sumiria (canal PCM ocupado) vai para o PSG, imitada
 
 
 def to_stream(board: Board, cap: Capture, opt: Options | None = None):
@@ -660,6 +674,13 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         frames[f].append(("fm", port, nr, v))
     report.append("FM: " + (", ".join(f"canal {k + 1} → FM {k + 1}" for k in sorted(fm_used)) or "não toca"))
 
+    # ---- SSG → PSG (convertido antes do ADPCM: o transbordo precisa saber que canais ele usa)
+    ssg_conv = None
+    if any(r in (8, 9, 10) and v & 0x1F for _, _, r, v in ssg):
+        ay = AyVgm(SSG_CLOCK, False, ssg, end, loop, {})
+        ssg_conv = ay_convert(ay, trim=False, fm_slots=[4])
+    psg_free = _psg_free_frames(ssg_conv.stream.frames if ssg_conv else [], n_frames)
+
     # ---- ADPCM → PCM do XGM
     samples = {}                          # chave → id
     data = {}                             # id → int8
@@ -673,6 +694,7 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         r in (8, 9, 10) and v & 0x1F for _, _, r, v in ssg)
     use_noise = opt.metals_to_noise and not ssg_noise
     n_metal = 0
+    over = _Overflow(n_frames, psg_free, noise_free=not use_noise and not ssg_noise) if opt.psg_overflow else None
 
     def sample_for(kind, start, stop, level_db, rate):
         nonlocal n_metal
@@ -702,6 +724,12 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
             env = _noise_envelope(y * gain * 0.7, PCM_RATE)
             metal_noise.append((f, env))
             return
+        free = [c for c in opt.pcm_channels if busy[c][0] <= f]
+        ch = free[0] if free else min(opt.pcm_channels, key=lambda c: busy[c][1])
+        if not free and over is not None and f - busy[ch][1] <= OVERFLOW_FRAMES:
+            # a nota que está no canal acabou de começar e sumiria: a nova vai imitada para o PSG
+            if over.place(f, y * gain, key[:-1]):
+                return
         if key not in samples:
             if len(samples) >= 63:
                 dropped += 1
@@ -711,8 +739,6 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
             data[sid] = np.clip(np.round(y * gain * 127), -128, 127).astype(np.int8)
         sid = samples[key]
         dur = int(math.ceil(len(data[sid]) / PCM_RATE * FPS))
-        free = [c for c in opt.pcm_channels if busy[c][0] <= f]
-        ch = free[0] if free else min(opt.pcm_channels, key=lambda c: busy[c][1])
         busy[ch] = (f + dur, f)
         frames[f].append(("pcm", ch, sid, 2))
 
@@ -788,15 +814,20 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
                 last = vol[f]
         report.append(f"Chimbais e pratos: {len(metal_noise)} notas no ruído do PSG")
 
+    if over is not None:
+        report.append(over.summary())
+
     # ---- SSG → PSG
-    if any(r in (8, 9, 10) and v & 0x1F for _, _, r, v in ssg):
-        ay = AyVgm(SSG_CLOCK, False, ssg, end, loop, {})
-        conv = ay_convert(ay, trim=False, fm_slots=[4])
+    if ssg_conv is not None:
+        conv = ssg_conv
         report += ["SSG: " + x for x in conv.report[1:]]
         for i, fr in enumerate(conv.stream.frames[:n_frames]):
             if metal_noise:            # o ruído é das peças metálicas
                 fr = [w for w in fr if not (w[0] == "psg" and (w[1] & 0xE0) in (0xE0,) and w[1] & 0x80)]
             frames[i] = fr + frames[i] if i == 0 else frames[i] + fr
+    if over is not None:                  # por último: vale sobre o que o SSG escreveu no mesmo quadro
+        for i, ws in enumerate(over.frames):
+            frames[i] += ws
 
     loop_frame = None if loop is None else frame_of(loop)
     stream = Stream(frames=frames, fps=FPS, loop_frame=loop_frame, pcm_samples=data, pcm_rate=PCM_RATE)
@@ -806,6 +837,124 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         stream.stats["seamless_loop"] = True
         report.append(f"Loop: volta ao quadro {loop_frame}, a cada {loop_len} quadros ({loop_len / FPS:.2f} s)")
     return stream, report
+
+
+# ============================================================================ transbordo para o PSG
+OVERFLOW_FRAMES = 4                       # nota no canal PCM há até 4 quadros (67 ms): seria cortada
+PSG_MIN_HZ = 3579545 / (32 * 1023)        # ≈ 109 Hz, a nota mais grave do tom do PSG
+
+
+def _psg_free_frames(ssg_frames, n_frames: int) -> np.ndarray:
+    """free[canal, quadro]: o tom do PSG (0–2) está mudo na conversão do SSG."""
+    free = np.ones((3, n_frames), dtype=bool)
+    vol = [15, 15, 15]
+    noise_on_tone3 = False
+    for f in range(n_frames):
+        for w in ssg_frames[f] if f < len(ssg_frames) else ():
+            if w[0] != "psg":
+                continue
+            b = w[1]
+            if b & 0x90 == 0x90 and (b >> 5) & 3 < 3:
+                vol[(b >> 5) & 3] = b & 15
+            elif b & 0xF0 == 0xE0 and b & 3 == 3:
+                noise_on_tone3 = True         # o ruído segue a frequência do tom 3
+        for c in range(3):
+            free[c, f] = vol[c] == 15
+    if noise_on_tone3:
+        free[2, :] = False
+    return free
+
+
+class _Overflow:
+    """Imitação no PSG das notas de ADPCM que sumiriam por falta de canal PCM:
+
+    * com altura definida (sinos, ataques de orquestra, baixo…): onda quadrada na nota da amostra;
+    * bumbo e tons (som grave, sem altura estável): onda quadrada descendo de 330 para 110 Hz;
+    * caixa (ruidosa, com corpo): ruído branco, se o ruído do PSG estiver livre.
+
+    O volume segue o da amostra quadro a quadro. Vozes e efeitos (sem altura, agudos) não têm
+    imitação que preste e continuam no PCM."""
+
+    def __init__(self, n_frames: int, psg_free: np.ndarray, noise_free: bool):
+        self.n = n_frames
+        self.free = psg_free.copy()
+        self.noise_until = 0 if noise_free else n_frames + 1
+        self.frames = [[] for _ in range(n_frames)]
+        self.kind_cache: dict = {}
+        self.count = {"tom": 0, "bumbo": 0, "caixa": 0}
+        self.failed = 0
+
+    def _kind(self, y: np.ndarray, key):
+        if key not in self.kind_cache:
+            from mdconv.pcm.kit import is_metal, piece_features
+            kind, hz = None, 0.0
+            if len(y) > 256:
+                feat = piece_features(y, int(PCM_RATE))
+                per = _f0(np.asarray(y, dtype=np.float64))
+                if per > 0 and 60.0 <= PCM_RATE / per <= 4000.0:
+                    kind, hz = "tom", PCM_RATE / per
+                    while hz < PSG_MIN_HZ:
+                        hz *= 2
+                elif feat["low"] >= 0.4 and feat["centroid_hz"] < 1200:
+                    kind = "bumbo"
+                elif not is_metal(feat) and 0.05 <= feat["low"] < 0.4 and feat["centroid_hz"] < 4000:
+                    kind = "caixa"
+            self.kind_cache[key] = (kind, hz)
+        return self.kind_cache[key]
+
+    def place(self, f: int, y: np.ndarray, key) -> bool:
+        from mdconv.pcm.kit import NOISE_FULL_DB, _noise_envelope
+        kind, hz = self._kind(y, key)
+        if kind is None:
+            self.failed += 1
+            return False
+        env = _noise_envelope(np.asarray(y, dtype=np.float64) * 0.7, PCM_RATE)
+        vols = [max(0, min(15, int(round((a - NOISE_FULL_DB) / 2)))) for a in env][: self.n - f]
+        while vols and vols[-1] == 15:
+            vols.pop()
+        if not vols:
+            self.failed += 1
+            return False
+        if kind == "caixa":
+            if self.noise_until > f:
+                self.failed += 1
+                return False
+            self.noise_until = f + len(vols) + 1
+            self.frames[f].append(("psg", 0xE4))
+            for k, v in enumerate(vols):
+                self.frames[f + k].append(("psg", 0xF0 | v))
+            if f + len(vols) < self.n:
+                self.frames[f + len(vols)].append(("psg", 0xFF))
+            self.count[kind] += 1
+            return True
+        # canal de tom livre (do SSG e de outro transbordo) pelo maior trecho
+        best, run = None, 0
+        for c in range(3):
+            r = 0
+            while f + r < self.n and r < len(vols) + 1 and self.free[c, f + r]:
+                r += 1
+            if r > run:
+                best, run = c, r
+        if best is None or run < 2:
+            self.failed += 1
+            return False
+        vols = vols[: run - 1]
+        for k, v in enumerate(vols):
+            h = hz if kind == "tom" else max(PSG_MIN_HZ, 330.0 * 2 ** (-k / 3))
+            per = max(1, min(1023, int(round(3579545 / (32 * h)))))
+            self.frames[f + k] += [("psg", 0x80 | (best << 5) | (per & 15)), ("psg", (per >> 4) & 0x3F),
+                                   ("psg", 0x90 | (best << 5) | v)]
+            self.free[best, f + k] = False
+        self.frames[f + len(vols)].append(("psg", 0x90 | (best << 5) | 15))
+        self.free[best, f + len(vols)] = False
+        self.count[kind] += 1
+        return True
+
+    def summary(self) -> str:
+        n = sum(self.count.values())
+        return (f"Transbordo para o PSG: {n} nota(s) que seriam cortadas no PCM foram imitadas no PSG "
+                f"({self.count['tom']} com altura, {self.count['bumbo']} bumbo/tom, {self.count['caixa']} caixa)"
+                + (f"; {self.failed} sem imitação ou sem canal livre continuaram no PCM" if self.failed else ""))
 
 
 def _f0(x: np.ndarray) -> float:

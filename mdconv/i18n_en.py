@@ -513,8 +513,8 @@ EN = {
         "12 dB (less ROM)",
     "Marque ao menos um canal PCM para a música.":
         "Check at least one PCM channel for the music.",
-    "{0} jogos CPS1 + jogos de GBA com o motor de som da Nintendo + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98), direto para o Mega Drive":
-        "{0} CPS1 games + GBA games with Nintendo's sound engine + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis and Neo Geo (KOF 94 to 98), straight to the Mega Drive",
+    "{0} jogos CPS1 + jogos de GBA com o motor de som da Nintendo + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis e Neo Geo (KOF 94 a 98, Garou), direto para o Mega Drive":
+        "{0} CPS1 games + GBA games with Nintendo's sound engine + Irem (Moon Patrol, Kung-Fu Master, Lode Runner), Ghosts 'n Goblins, Nemesis and Neo Geo (KOF 94 to 98, Garou), straight to the Mega Drive",
     "Erro ao carregar":
         "Error while loading",
     "Aviso: ":
@@ -703,4 +703,76 @@ EN = {
         "VGM / VGZ files (AY-3-8910, YM2203 or Mega Drive) or XGM",
     "VGM com AY-3-8910, YM2203 ou Mega Drive, ou XGM do SGDK":
         "VGM with AY-3-8910, YM2203 or Mega Drive, or SGDK XGM",
+    "bumbo (modo bateria)":
+        "bass drum (rhythm mode)",
+    "tom (modo bateria)":
+        "tom (rhythm mode)",
+    "Destino de cada canal (AY-3-8910 e OPL)":
+        "Destination of each channel (AY-3-8910 and OPL)",
+    "OPL (YM3526, YM3812, Y8950): \"Automático\" manda as vozes mais importantes e as graves para os 6 canais FM; as que sobram vão para o PSG, como onda quadrada (só se não descerem abaixo de ~110 Hz). Escolha aqui quem fica no FM, quem vai para o PSG e quem não toca.":
+        "OPL (YM3526, YM3812, Y8950): \"Automatic\" sends the most important voices and the low ones to the 6 FM channels; the rest go to the PSG as a square wave (only if they don't go below ~110 Hz). Choose here who stays on FM, who goes to the PSG and who doesn't play.",
+    "Canal do OPL":
+        "OPL channel",
+    "canal {0}":
+        "channel {0}",
+    "OPL {0} e {1} → {2}":
+        "OPL {0} and {1} → {2}",
+    "Música VGM (AY / YM2203 / OPL / Mega Drive)":
+        "VGM music (AY / YM2203 / OPL / Mega Drive)",
+    "Arquivos VGM / VGZ (AY-3-8910, YM2203, OPL ou Mega Drive) ou XGM":
+        "VGM / VGZ files (AY-3-8910, YM2203, OPL or Mega Drive) or XGM",
+    "VGM com AY-3-8910, YM2203, OPL ou Mega Drive, ou XGM do SGDK":
+        "VGM with AY-3-8910, YM2203, OPL or Mega Drive, or SGDK XGM",
+    "Tamanho do XGM": "XGM size",
+    "Tamanho do XGM: {0}": "XGM size: {0}",
+    "Qualidade máxima": "Maximum quality",
+    "Equilibrado": "Balanced",
+    "Compacto": "Compact",
+    "Só tira o que não muda o som (escritas repetidas, amostras idênticas, silêncio).":
+        "Removes only what doesn't change the sound (repeated writes, identical samples, silence).",
+    "Arquivo um pouco menor, som igual ao ouvido (recomendado).":
+        "Slightly smaller file, sounds the same to the ear (recommended).",
+    "Arquivo bem menor: amostras mais curtas e juntadas; pequena perda nas batidas longas.":
+        "Much smaller file: shorter, merged samples; slight loss on long drum hits.",
+    "amostras: {0} → {1}": "samples: {0} → {1}",
+    " ({0} junta(s))": " ({0} merged)",
+    "{0} escrita(s) repetida(s) removida(s)": "{0} repeated write(s) removed",
+    "tamanho ({0}): ": "size ({0}): ",
+    "Volume das amostras": "Sample volume",
+    "Volume do FM fixo": "Fixed FM volume",
+    "Algoritmo e feedback": "Algorithm and feedback",
+    "Copiar de": "Copy from",
+    "Deixa a música com as características técnicas de outra (XGM ou VGM do Mega Drive): marque abaixo o que copiar. Vale para todos os arquivos da lista; o original nunca é sobrescrito.":
+        "Gives the song the technical characteristics of another one (XGM or Mega Drive VGM): check below what to copy. Applies to every file in the list; the original is never overwritten.",
+    "XGM ou VGM do Mega Drive de referência": "Reference XGM or Mega Drive VGM",
+    "Ver": "Show",
+    "Mostra o que a referência tem (volume das amostras, algoritmos, LFO).":
+        "Shows what the reference has (sample volume, algorithms, LFO).",
+    "O pico das amostras fica igual ao da referência (um ganho só para todas).":
+        "The sample peak matches the reference (one gain for all of them).",
+    "Cada instrumento toca sempre no volume mais forte que já usava: somem acentos, ecos e fades.":
+        "Each instrument always plays at the loudest volume it already used: accents, echoes and fades go away.",
+    "Algoritmo e feedback de cada canal FM iguais aos da referência. Muda o timbre: os operadores continuam os da música.":
+        "Algorithm and feedback of each FM channel match the reference. Changes the timbre: the operators stay the song's own.",
+    "LFO global e sensibilidade AMS/FMS de cada canal iguais aos da referência.":
+        "Global LFO and per-channel AMS/FMS sensitivity match the reference.",
+    "Estilo de referência:": "Reference style:",
+    "Escolha o arquivo de referência do estilo.": "Choose the style reference file.",
+    "Marque pelo menos uma característica para copiar.": "Check at least one characteristic to copy.",
+    "Estilo de referência: ": "Reference style: ",
+    "Música de referência do estilo": "Style reference song",
+    "A referência de estilo tem de ser um XGM ou um VGM do Mega Drive: {0}":
+        "The style reference must be an XGM or a Mega Drive VGM: {0}",
+    "{0}: pico das amostras {1}, algoritmo/feedback {2}, LFO {3}": "{0}: sample peak {1}, algorithm/feedback {2}, LFO {3}",
+    "ligado": "on",
+    "desligado": "off",
+    "algoritmo/feedback da referência: {0}": "reference algorithm/feedback: {0}",
+    "volume do FM fixo: {0} → {1} mudanças de volume": "fixed FM volume: {0} → {1} volume changes",
+    "LFO da referência: {0}": "reference LFO: {0}",
+    "volume das amostras: pico {0} → {1} ({2:+.1f} dB)": "sample volume: peak {0} → {1} ({2:+.1f} dB)",
+    "estilo de {0}: ": "style of {0}: ",
+    "Transbordo para o PSG: nota que sumiria por falta de canal PCM é imitada no PSG":
+        "PSG overflow: a note that would vanish for lack of a PCM channel is imitated on the PSG",
+    "Quando o canal PCM está ocupado por uma nota que acabou de começar, a nova vai para um tom livre do PSG (onda quadrada na nota da amostra; bumbo e tons com a altura caindo; caixa no ruído, se ele estiver livre). Vozes e efeitos continuam no PCM. Soa mais simples que a amostra, mas melhor que silêncio — útil com um canal PCM só.":
+        "When the PCM channel is busy with a note that has just started, the new one goes to a free PSG tone (square wave at the sample's pitch; bass drum and toms with falling pitch; snare on the noise, if it is free). Voices and effects stay on PCM. Simpler than the sample, but better than silence — useful with a single PCM channel.",
 }

@@ -2,6 +2,57 @@
 
 Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.10.0.
 
+## [0.11.3] — 2026-11-21
+
+### Novidades
+
+**Extração — Neo Geo**
+- **Garou: Mark of the Wolves** (`garou.zip`): o programa de som (Sound Driver Ver 1.8 da SNK) roda emulado como
+  nos KOF; 66 músicas e jingles. Precisa de um romset com a ROM M1 sem criptografia. 18 faixas já saem com nome:
+  os temas dos 14 lutadores, Sunset Sky Again, Dark Lightning -Emergence-, Do You Do? e Victory Message.
+- **Transbordo para o PSG** (Opções do Neo Geo…, desmarcado por padrão): quando o canal PCM está ocupado por uma
+  nota que acabou de começar, a nota nova não some mais — vai imitada para um tom livre do PSG (onda quadrada na
+  nota da amostra, bumbo e tons com a altura caindo, caixa no ruído se ele estiver livre). Os canais usados pelo
+  SSG da música são respeitados; vozes e efeitos continuam no PCM. Tema do Dong Hwan (Garou) com um canal PCM:
+  notas que sumiam 277 → 56, XGM 251 → 241 KB.
+
+**Ferramentas → Música VGM**
+- **Chips OPL — YM3812 (OPL2), YM3526 e Y8950** (arcades como City Streets e Street Smart, placas AdLib/Sound
+  Blaster): os 9 canais FM de 2 operadores viram canais FM do YM2612 (par modulador → portadora; MULT, TL,
+  feedback, KSR, KSL, tremolo/vibrato e envelopes convertidos, com a correção de taxa medida no emulador). Mais de
+  6 vozes: as extras vão para o PSG como onda quadrada, com o envelope do OPL calculado quadro a quadro (as graves
+  ficam no FM). Formas de onda do OPL2 aproximadas com o 2º par de operadores; modo bateria (bumbo/tom como
+  vozes; caixa, prato e chimbal no ruído). Nova aba **OPL** na tabela de destinos para escolher à mão.
+- **Estilo de referência** ("Copiar de"): deixa a música com as características técnicas de outra (XGM ou VGM do
+  Mega Drive). Marque o que copiar: volume das amostras (um ganho só, pico igual ao da referência), volume do FM
+  fixo (cada instrumento no volume mais forte que já usava), algoritmo e feedback de cada canal FM e LFO. "Ver"
+  mostra o que a referência tem; o registro, o que mudou. Ex.: o menu de uma música extraída do Neo Geo com o
+  jeito do intro de um jogo de Mega Drive.
+- **Reduzir um XGM pronto**: abrir um XGM na aba e converter agora grava também um XGM novo, com a redução de
+  tamanho escolhida — sem extrair de novo. Se cair na mesma pasta, ganha o modo no nome (ex.
+  `30_compact.xgm`); o original nunca é sobrescrito. (Antes o XGM só era regravado quando o loop mudava.)
+
+**Exportação**
+- **Tamanho do XGM** (Ferramentas → Tamanho do XGM; na linha de comando, `--xgm-size max|balanced|compact`):
+  escolha entre arquivo maior com mais qualidade ou menor com boa qualidade. Vale para XGM, VGM e prévia de todas
+  as conversões e extrações (não para o .fur da música MIDI).
+  - *Qualidade máxima*: só sai o que não muda o som — escritas que repetem o valor que o registrador já tem
+    (FM e PSG; as de frequência só em par; key-on, DAC, timers e ruído nunca), amostras idênticas guardadas uma
+    vez só, amostras que nenhuma nota toca e silêncio exato no fim das amostras.
+  - *Equilibrado* (padrão): também o fim das amostras abaixo de −42 dB do pico e amostras quase iguais (mesma
+    forma, até 1,5 dB de diferença).
+  - *Compacto*: caudas abaixo de −30 dB (com descida de volume), nenhuma amostra acima de 0,55 s e cópias da
+    mesma amostra em volumes diferentes (até 6 dB) juntadas.
+  - O registro mostra o ganho. Ex.: tema do Terry (Garou) 409 KB → 398 / 392 / 257 KB; menu.xgm 35 → 29 KB;
+    tema do Dong Hwan com as opções do Neo Geo ajustadas, 523 → 251 KB.
+
+**Documentação**
+- Manuais (português e inglês) e READMEs com as novidades acima e uma linha nova em Problemas comuns:
+  "XGM grande demais".
+
+### Correções
+- VGM/VGZ de OPL (ex.: `03_City_Streets.vgz`) davam erro na aba Música VGM: o chip não era suportado.
+
 ## [0.11.2] — 2026-11-18
 
 ### Novidades

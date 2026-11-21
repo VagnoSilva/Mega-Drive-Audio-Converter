@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — versão 0.11.2
+# Mega Drive Audio Converter — versão 0.11.3
 
 *Read in English: [README.en.md](README.en.md)*
 
@@ -9,7 +9,7 @@ Language).
 A janela tem duas abas:
 - **Extração** — tira MIDI + SoundFont direto da ROM: arcades **Capcom CPS1** (.zip do MAME) e
   **Game Boy Advance** (.gba, motor de som da Nintendo). Moon Patrol, Kung-Fu Master, Lode Runner,
-  Ghosts 'n Goblins, Nemesis e KOF 94 a 98 (Neo Geo) saem direto para o Mega Drive (XGM/VGM e efeitos em código C). Na CPS1 os timbres FM originais (YM2151)
+  Ghosts 'n Goblins, Nemesis, KOF 94 a 98 e Garou (Neo Geo) saem direto para o Mega Drive (XGM/VGM e efeitos em código C). Na CPS1 os timbres FM originais (YM2151)
   já saem convertidos para YM2612 numa biblioteca de patches aprovados. O botão
   "Abrir na conversão" leva a música escolhida para a outra aba.
 - **Conversão** — o conversor de sempre. Também aceita MIDI + SF2 do GBA Mus Ripper.
@@ -33,6 +33,30 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 `python -m mdconv.cli --version`).
 
 ## Histórico de versões
+
+**0.11.3**
+- **Neo Geo — Garou: Mark of the Wolves** (`garou.zip`): o programa de som é o "Sound Driver(ROM)
+  Ver 1.8" da SNK, da mesma família do KOF 96–98 — reconhecido pela mesma tabela de comandos (66
+  músicas e jingles). Precisa de um romset com a ROM M1 sem criptografia.
+- **OPL — YM3812, YM3526, Y8950** na aba Música VGM (`mdconv/opl/convert.py`): 9 canais FM de 2
+  operadores → 6 FM do YM2612 (algoritmo 4/7, envelopes corrigidos: o EG do OPL anda a cada amostra,
+  o do YM2612 a cada 3) + PSG para as vozes que sobram; ondas do OPL2 com o par 3→4; modo bateria;
+  rotas por canal na aba OPL da tabela de destinos.
+- **Tamanho do XGM** (`mdconv/export/optimize.py`; menu Ferramentas → Tamanho do XGM, ou
+  `--xgm-size max|balanced|compact`): antes de gravar XGM/VGM/prévia, remove escritas repetidas
+  (estado esquecido no quadro do loop; frequência só em par), junta amostras idênticas e — conforme
+  o modo — corta caudas (−42 / −30 dB), limita amostras a 0,55 s e junta cópias em volumes
+  diferentes. Garou, tema do Terry: 409 → 392 KB (Equilibrado) → 257 KB (Compacto).
+- **Transbordo para o PSG** no Neo Geo (`Options.psg_overflow`, `neogeo._Overflow`): nota de ADPCM
+  que cortaria outra recém-começada no mesmo canal PCM vira tom/bumbo/caixa no PSG (canais livres do
+  SSG, altura por autocorrelação, volume pelo RMS por quadro). Amostras que nenhuma nota toca saem
+  do XGM (`export/optimize.py`).
+- **Estilo de referência** (`mdconv/export/restyle.py`; Ferramentas → Música VGM → "Copiar de"):
+  copia de outro XGM/VGM do Mega Drive o pico das amostras, o volume fixo do FM (portadoras no TL
+  mais baixo visto com o mesmo patch, moduladores no mais comum), algoritmo/feedback por canal e o
+  LFO ($22 e AMS/FMS de $B4). `convert_file(..., style=(referência, opções))`.
+- Abrir um XGM na aba Música VGM grava também um XGM novo, reduzido (nunca sobrescreve o
+  original).
 
 **0.11.2**
 - **VGM do Mega Drive** (YM2612 + SN76489) na aba Música VGM das Ferramentas: reempacotado para

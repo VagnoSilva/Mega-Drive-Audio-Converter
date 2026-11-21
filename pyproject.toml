@@ -1,6 +1,6 @@
 [project]
 name = "mdconv"
-version = "0.11.2"
+version = "0.11.3"
 description = "Conversor de músicas (MIDI + SF2 de GBA e de arcades Capcom CPS1) para Mega Drive (YM2612/SN76489, XGM/VGM/Furnace)"
 requires-python = ">=3.10"
 dependencies = ["numpy", "scipy"]

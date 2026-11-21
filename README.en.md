@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — version 0.11.2
+# Mega Drive Audio Converter — version 0.11.3
 
 *Leia em português: [README.md](README.md)*
 
@@ -19,7 +19,7 @@ The window has two tabs:
     YM2151 FM voices come out already converted to YM2612 as a library of approved patches.
   - Games converted **directly to the Mega Drive** (XGM, VGM, Furnace and preview; sound effects as
     C code for SGDK): **Moon Patrol, Kung-Fu Master, Lode Runner** (Irem), **Ghosts 'n Goblins**
-    (Capcom), **Nemesis** (Konami) and **The King of Fighters '94 to '98** (Neo Geo). The sound
+    (Capcom), **Nemesis** (Konami) and **The King of Fighters '94 to '98** and **Garou: Mark of the Wolves** (Neo Geo). The sound
     program of the board runs emulated (or the ROM's sound scripts are interpreted) and what it
     plays is translated chip by chip.
 - **Conversion** — turns MIDI + SoundFont into Mega Drive music. It also accepts MIDI + SF2 from
@@ -31,8 +31,8 @@ The window has two tabs:
 **Tools → Converters and effects…** (Ctrl+T) opens a window with the converters outside the
 MIDI + SF2 flow:
 
-- **VGM music (AY / YM2203 / Mega Drive)** — AY-3-8910 (arcades, MSX, ZX Spectrum…) and YM2203 VGMs
-  translated register by register, with a choice of destination for each AY channel; VGMs that are
+- **VGM music (AY / YM2203 / OPL / Mega Drive)** — AY-3-8910 (arcades, MSX, ZX Spectrum…), YM2203
+  and OPL (YM3812, YM3526, Y8950 — arcades, AdLib/Sound Blaster) VGMs translated register by register, with a choice of destination for each AY channel; VGMs that are
   already Mega Drive music (YM2612 + SN76489) repackaged as XGM/.fur, with the DAC samples as XGM PCM.
   A ready-made SGDK XGM can also be turned into VGM, .fur and a preview. The loop can be added or
   changed.
@@ -103,6 +103,23 @@ XGM_setLoopNumber(-1);
 The music only uses the PCM channels checked in the arrangement (default CH1 and CH2) and the
 sample ids 1–63; the game's own effects can use the other channels and ids from 64 on. Chip effects
 come out as `.c` files with `name_play()`, `name_update()` (once per frame) and `name_stop()`.
+
+## XGM size
+
+Tools → XGM size (command line: `--xgm-size max|balanced|compact`) trades quality for size in
+every XGM, VGM and preview written afterwards. *Maximum quality* removes only what doesn't change
+the sound (repeated register writes, identical samples, trailing silence); *Balanced* (default)
+also trims sample tails below −42 dB and merges nearly identical samples; *Compact* trims tails
+below −30 dB, caps samples at 0.55 s and merges copies of the same sample at different volumes.
+Example: Garou, Terry's theme, 409 KB → 392 KB (Balanced) → 257 KB (Compact). PCM samples are
+almost all of a big XGM's size.
+
+## Reference style
+
+Tools → VGM music → "Copy from" gives a song the technical characteristics of another XGM or Mega
+Drive VGM: sample volume (one gain, peak matching the reference), fixed FM volume (each
+instrument at the loudest volume it already used), algorithm and feedback per FM channel, and the
+LFO. Code: `mdconv/export/restyle.py`.
 
 ## Languages
 

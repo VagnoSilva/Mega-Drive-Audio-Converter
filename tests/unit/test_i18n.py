@@ -15,7 +15,7 @@ SAME = {"Mega Drive Audio Converter", "XGM v1 (SGDK)", "MIDI (*.mid *.midi)", "S
         "SoundFont (.sf2)", "VGM (*.vgm *.vgz)", "WAV (*.wav)", "Normal", "PSG", " dB", " Hz", "6 dB",
         "14000 Hz = XGM v1.", "Furnace 0.6.8.3 (.fur)", "FM {0}", "PSG {0}", "FM {}", "{0}: {1}",
         "Idioma / Language", "AY{0} {1} → {2}", "3. Loop", "SoundFont (.sf2):", " ({0} cand.)",
-        "\nSoundFont: {0}", "Loop:", "VGM / XGM (*.vgm *.vgz *.xgm)"}
+        "\nSoundFont: {0}", "Loop:", "VGM / XGM (*.vgm *.vgz *.xgm)", "LFO", "XGM / VGM (*.xgm *.vgm *.vgz)"}
 
 
 def _keys():

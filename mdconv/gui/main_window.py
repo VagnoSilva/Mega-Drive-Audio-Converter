@@ -172,8 +172,10 @@ class MainWindow(QMainWindow):
         from mdconv.export import optimize
         size = f.addMenu(tr("Tamanho do XGM"))
         sgrp = QActionGroup(self)
+        self.size_actions = {}
         for code, name in optimize.MODES.items():
             act = QAction(tr(name), self, checkable=True)
+            self.size_actions[code] = act
             act.setChecked(code == optimize.mode())
             act.setToolTip(tr(optimize.HINTS[code]))
             act.triggered.connect(lambda _=False, c=code: self.set_size_mode(c))
@@ -200,6 +202,10 @@ class MainWindow(QMainWindow):
         from mdconv.export import optimize
         optimize.set_mode(code)
         self.qsettings.setValue("export/size_mode", code)
+        if code in getattr(self, "size_actions", {}):
+            self.size_actions[code].setChecked(True)
+        if getattr(self, "_tools", None) is not None:
+            self._tools.sync_size_mode()
         self.statusBar().showMessage(tr("Tamanho do XGM: {0}").format(tr(optimize.MODES[code])), 5000)
 
     def set_language(self, code: str) -> None:
@@ -1176,11 +1182,20 @@ class MainWindow(QMainWindow):
                          work, done)
 
     def convert_vgm_job(self, files, dst, grid=False, trim=True, routing=None, on_done=None,
-                        loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None, style=None):
+                        loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None, style=None,
+                        neo_options=None, subfolders=False, pcm_atten_db=0.0):
         """VGM de AY-3-8910 (Moon Patrol, MSX…), YM2203 (Ghosts 'n Goblins…) ou do próprio Mega
         Drive: conversão direta para XGM/VGM/.fur. ``routing``: rotas manuais dos canais do AY;
         ``loop_start``/``loop_end``: loop escolhido à mão (segundos)."""
+        import json
+
         from mdconv.vgmconv import convert_file
+        neo = neo_options
+        if neo is None:
+            try:                                # as mesmas opções do Neo Geo da aba Extração
+                neo = json.loads(self.qsettings.value("extract/neo_options", "{}") or "{}")
+            except (ValueError, TypeError):
+                neo = {}
 
         def work(progress):
             out, bad = [], 0
@@ -1189,7 +1204,8 @@ class MainWindow(QMainWindow):
                 try:
                     out += convert_file(f, dst, grid=grid, trim=trim, routing=routing, log=progress,
                                         loop_start=loop_start, loop_end=loop_end, pcm_channel=pcm_channel,
-                                        opl_routing=opl_routing, style=style)
+                                        opl_routing=opl_routing, style=style, neo_options=neo,
+                                        subfolder=subfolders, pcm_atten_db=pcm_atten_db)
                 except Exception as exc:              # um arquivo ruim não para o lote
                     bad += 1
                     progress(f"✖ {Path(f).name}: {exc}")

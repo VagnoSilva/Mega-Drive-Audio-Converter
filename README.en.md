@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — version 0.11.3
+# Mega Drive Audio Converter — version 0.11.4
 
 *Leia em português: [README.md](README.md)*
 
@@ -34,6 +34,8 @@ MIDI + SF2 flow:
 - **VGM music (AY / YM2203 / OPL / Mega Drive)** — AY-3-8910 (arcades, MSX, ZX Spectrum…), YM2203
   and OPL (YM3812, YM3526, Y8950 — arcades, AdLib/Sound Blaster) VGMs translated register by register, with a choice of destination for each AY channel; VGMs that are
   already Mega Drive music (YM2612 + SN76489) repackaged as XGM/.fur, with the DAC samples as XGM PCM.
+  Neo Geo VGMs (YM2610, from vgmrips) go through the same conversion as the Neo Geo ROM extraction, with the
+  Neo Geo options and the XGM size choice available in the tab.
   A ready-made SGDK XGM can also be turned into VGM, .fur and a preview. The loop can be added or
   changed.
 - **Chip effects (AY)** — AY effect VGMs → PSG/FM + C code for SGDK, on the channels you mark as free.

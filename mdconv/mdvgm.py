@@ -143,7 +143,10 @@ def read_vgm(path) -> MdVgm:
             pcm_pos += 1
             t, p = t + (c & 15), p + 1
         elif c == 0xE0:
-            pcm_pos = struct.unpack_from("<I", d, p + 1)[0]
+            new = struct.unpack_from("<I", d, p + 1)[0]
+            if new != pcm_pos and direct and direct[-1] is not None:
+                direct.append(None)                 # salto no banco = começa outra amostra
+            pcm_pos = new
             p += 5
         elif c == 0x67:
             typ, size = d[p + 2], struct.unpack_from("<I", d, p + 3)[0] & 0x7FFFFFFF
@@ -264,8 +267,18 @@ def _decompress(raw: bytes, table: bytes) -> bytes:
 
 
 def _direct_hits(direct):
-    """Bytes escritos um a um no DAC (0x2A) → disparos de amostra: cada trecho contínuo (sem
-    pausa maior que 2 ms) vira uma amostra, na taxa média em que os bytes chegaram."""
+    """Bytes escritos um a um no DAC (0x2A ou 0x8n) → disparos de amostra: cada trecho contínuo (sem
+    pausa maior que 2 ms e sem salto do 0xE0 no banco, marcado com None) vira uma amostra, na taxa média
+    em que os bytes chegaram."""
+    if None in direct:
+        out, run = [], []
+        for x in direct + [None]:
+            if x is None:
+                out += _direct_hits(run)
+                run = []
+            else:
+                run.append(x)
+        return out
     out, i = [], 0
     while i < len(direct):
         j = i + 1
@@ -280,10 +293,15 @@ def _direct_hits(direct):
     return out
 
 
+EXACT_RATE_TOL = 0.003
+
+
 def _resample(data: bytes, rate: float) -> np.ndarray:
     x = (np.frombuffer(data, np.uint8).astype(np.float32) - 128.0)
     n = max(1, int(round(len(x) * PCM_RATE / rate)))
-    if n == len(x):
+    # taxa a até 0,3% dos 14 kHz do XGM (ex.: 14 015 Hz do Furnace): cópia exata, byte a byte — a
+    # interpolação apagaria agudos, e a diferença de afinação (< 5 cents) não se ouve
+    if n == len(x) or abs(rate / PCM_RATE - 1) <= EXACT_RATE_TOL:
         y = x
     else:
         pos = np.arange(n) * (len(x) / n)
@@ -329,6 +347,19 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
     ids: dict[tuple, int] = {}
     samples: dict[int, np.ndarray] = {}
     dropped = 0
+    # um disparo cortado (pelo seguinte, ou um VGM que grava só o trecho tocado) usa a amostra inteira
+    # de que ele é o começo, e para no mesmo ponto: o XGM não ganha uma cópia encurtada por disparo
+    rk = lambda r: int(round(r / 50.0)) * 50    # taxa medida pelos 0x8n oscila alguns Hz: 13 996 ≈ 14 000
+    keys = {(h[1].rstrip(b"\x80") or h[1], rk(h[2])) for h in v.hits if h[1] is not None}
+    longest = sorted(keys, key=lambda k: -len(k[0]))
+    canon = {}
+    for k in keys:
+        for big in longest:
+            if len(big[0]) <= len(k[0]):
+                break
+            if big[1] == k[1] and big[0].startswith(k[0]):
+                canon[k] = big
+                break
     for h in v.hits:
         f = max(first, frame(h[0]))
         if f >= n_frames:
@@ -336,13 +367,18 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
         if h[1] is None:
             frames[f].append(("pcm", pcm_channel, 0, 3))
             continue
-        key = (h[1], round(h[2]))
+        key = (h[1].rstrip(b"\x80") or h[1], rk(h[2]))
+        if key in canon:
+            stop = int(round((h[0] + len(key[0]) * VGM_RATE / h[2]) * FPS / VGM_RATE))
+            if f < stop < n_frames:
+                frames[max(first, stop)].append(("pcm", pcm_channel, 0, 3))
+            key = canon[key]
         if key not in ids:
             if len(ids) >= MAX_SAMPLES:
                 dropped += 1
                 continue
             ids[key] = len(ids) + 1
-            samples[ids[key]] = _resample(h[1], h[2])
+            samples[ids[key]] = _resample(key[0], h[2])
         frames[f].append(("pcm", pcm_channel, ids[key], 3))
     frames = frames[first:]
     if frames:
@@ -354,7 +390,9 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
         kb = sum(len(s) for s in samples.values()) / 1024
         rates = sorted({round(k[1]) for k in ids})
         report.append(f"PCM: {len(samples)} amostra(s), {kb:.0f} KB a 14 kHz, no canal PCM {pcm_channel} "
-                      f"(taxas originais: {', '.join(map(str, rates))} Hz)")
+                      f"(taxas originais: {', '.join(map(str, rates))} Hz"
+                      + ("; cópia exata, sem reamostrar" if all(abs(r / PCM_RATE - 1) <= EXACT_RATE_TOL for r in rates)
+                         else "") + ")")
     fm6 = sum(1 for _, w in v.writes if w[0] == "fm" and w[1] == 0 and w[2] == 0x28
               and (w[3] & 7) == 6 and w[3] & 0xF0)
     if fm6 and samples:

@@ -29,9 +29,10 @@ class _Signals(QObject):
 
 
 class _Job(QRunnable):
-    def __init__(self, game, out_dir, opts):
+    def __init__(self, game, out_dir, opts, flatten=False, per_song=False):
         super().__init__()
         self.game, self.out_dir, self.opts = game, out_dir, opts
+        self.flatten, self.per_song = flatten, per_song
         self.signals = _Signals()
 
     def run(self):
@@ -41,6 +42,8 @@ class _Job(QRunnable):
                 log=lambda m: self.signals.log.emit(str(m)),
                 progress=lambda stage, a, b: self.signals.prog.emit(int(a), int(max(1, b))),
                 **self.opts)
+            if base and (self.flatten or self.per_song):
+                base = extract.organize(base, self.out_dir if self.flatten else None, self.per_song)
             self.signals.done.emit(base)
         except Exception:  # noqa: BLE001 — o erro aparece no registro
             self.signals.log.emit(traceback.format_exc())
@@ -315,6 +318,11 @@ class ExtractTab(QWidget):
             return
         out = self.ed_out.text().strip() or str(Path.home() / "Desktop" / "Audio_extraido")
         self.qs.setValue("extract/out", out)
+        from mdconv.gui.outdir import ask_out_dir
+        r = ask_out_dir(self, self.qs, out, tr("Extração"))
+        if r is None:
+            return
+        out, new_name, per_song = r
         opts = dict(plays=self.sp_plays.value(), do_midi=self.ck_midi.isChecked(),
                     do_sf2=self.ck_sf2.isChecked(), do_wav=self.ck_wav.isChecked(),
                     do_mdlib=self.ck_lib.isChecked(),
@@ -327,7 +335,8 @@ class ExtractTab(QWidget):
         self.log.clear()
         self.prog.setValue(0)
         self.bt_go.setEnabled(False)
-        self.job = _Job(self.game, out, opts)
+        # pasta nova: o jogo é extraído nela e o conteúdo da pasta do jogo sobe para ela
+        self.job = _Job(self.game, out, opts, flatten=bool(new_name), per_song=per_song)
         self.job.signals.log.connect(self.log.appendPlainText)
         self.job.signals.prog.connect(lambda a, b: (self.prog.setMaximum(b), self.prog.setValue(a)))
         self.job.signals.done.connect(self._done)
@@ -394,12 +403,15 @@ class ExtractTab(QWidget):
             return
         o = extract.outputs(base)
         self._outs = o
-        if not o.midis and (os.path.isdir(os.path.join(base, "musicas"))
-                            or os.path.isdir(os.path.join(base, "efeitos"))):
-            n_m = len(glob.glob(os.path.join(base, "musicas", "*.xgm")))
+        # músicas em "musicas" ou, com uma pasta por música, em <base>/<música>/
+        songs = glob.glob(os.path.join(base, "musicas", "*.xgm")) + [
+            f for f in glob.glob(os.path.join(base, "*", "*.xgm"))
+            if os.path.basename(os.path.dirname(f)) not in ("musicas", "efeitos", "vozes")]
+        if not o.midis and (songs or os.path.isdir(os.path.join(base, "efeitos"))):
+            n_m = len(songs)
             n_e = len(glob.glob(os.path.join(base, "efeitos", "*.c")))
             n_v = len(glob.glob(os.path.join(base, "vozes", "*.wav")))
-            for f in sorted(glob.glob(os.path.join(base, "musicas", "*.xgm")) + glob.glob(os.path.join(base, "efeitos", "*.c"))
+            for f in sorted(songs + glob.glob(os.path.join(base, "efeitos", "*.c"))
                             + glob.glob(os.path.join(base, "vozes", "*.wav"))):
                 self.ls_out.addItem(os.path.relpath(f, base))
             self.lb_out.setText(tr("{0} música(s) em XGM/VGM, {1} efeito(s) com código C e {2} voz(es) em WAV em {3}\nJá estão "
@@ -570,7 +582,7 @@ class NeoOptionsDialog(QDialog):
         self.sp_len.setSuffix(" s")
         f.addRow(tr("Duração máxima de cada amostra:"), self.sp_len)
         self.cb_step = QComboBox()
-        for txt, val in ((tr("3 dB (mais variações, mais ROM)"), 3.0), (tr("6 dB"), 6.0), (tr("12 dB (menos ROM)"), 12.0)):
+        for txt, val in ((tr("6 dB"), 6.0), (tr("12 dB (menos ROM)"), 12.0)):
             self.cb_step.addItem(txt, val)
         f.addRow(tr("Volume gravado na amostra, em passos de:"), self.cb_step)
         self.sp_min = QDoubleSpinBox()
@@ -597,7 +609,8 @@ class NeoOptionsDialog(QDialog):
         self.ck_b.setChecked(bool(o.get("adpcm_b_to_fm", True)))
         self.ck_over.setChecked(bool(o.get("psg_overflow", False)))
         self.sp_len.setValue(float(o.get("max_sample_s", 0.8)))
-        self.cb_step.setCurrentIndex(max(0, self.cb_step.findData(float(o.get("volume_step_db", 6.0)))))
+        step = 12.0 if float(o.get("volume_step_db", 6.0)) >= 9 else 6.0      # 3 dB saiu: vira 6 dB
+        self.cb_step.setCurrentIndex(max(0, self.cb_step.findData(step)))
         self.sp_min.setValue(float(o.get("min_level_db", -15.0)))
 
     def result_options(self) -> dict:

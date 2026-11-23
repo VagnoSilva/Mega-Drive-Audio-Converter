@@ -173,9 +173,9 @@ class ToolsDialog(QDialog):
     def _build_vgm(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910, YM2203, OPL ou Mega Drive) ou XGM"))
+        g = QGroupBox(tr("Arquivos VGM / VGZ (AY-3-8910, YM2203, YM2610, OPL ou Mega Drive) ou XGM"))
         gv = QVBoxLayout(g)
-        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910, YM2203, OPL ou Mega Drive, ou XGM do SGDK"), tr("VGM / XGM (*.vgm *.vgz *.xgm)"))
+        self.vgm_files = _FileList(self, "ay/dir", tr("VGM com AY-3-8910, YM2203, YM2610, OPL ou Mega Drive, ou XGM do SGDK"), tr("VGM / XGM (*.vgm *.vgz *.xgm)"))
         gv.addWidget(self.vgm_files)
         v.addWidget(g, 1)
 
@@ -222,6 +222,38 @@ class ToolsDialog(QDialog):
         self.vgm_pcm.setToolTip(tr("Em qual dos 4 canais PCM do XGM vão as amostras do DAC de um VGM do "
                                    "Mega Drive. Os outros ficam livres para os efeitos do jogo."))
         f.addRow(tr("Canal PCM (VGM do Mega Drive):"), self.vgm_pcm)
+        self.vgm_atten = QSpinBox()
+        self.vgm_atten.setRange(0, 24)
+        self.vgm_atten.setSuffix(" dB")
+        self.vgm_atten.setSpecialValueText(tr("sem atenuação"))
+        self.vgm_atten.setValue(int(self.qsettings.value("tools/vgm_pcm_atten", 0) or 0))
+        self.vgm_atten.setToolTip(tr("Abaixa o volume das amostras PCM (DAC) — bateria, vozes — em relação ao FM e "
+                                     "ao PSG, quando elas soam altas demais. 6 dB = metade do volume. Vale para "
+                                     "todos os chips (Mega Drive, Neo Geo…) e é gravado nas amostras do XGM."))
+        f.addRow(tr("Atenuar o PCM (DAC):"), self.vgm_atten)
+        # Neo Geo (YM2610): as mesmas opções da aba Extração (ficam salvas no mesmo lugar)
+        nr = QWidget()
+        nh = QHBoxLayout(nr)
+        nh.setContentsMargins(0, 0, 0, 0)
+        b = QPushButton(tr("Opções do Neo Geo…"))
+        b.setToolTip(tr("Canais PCM, chimbais no ruído, ADPCM-B no FM, duração e volume das amostras. São as "
+                        "mesmas opções da aba Extração: mudar aqui muda lá também."))
+        b.clicked.connect(self.edit_neo_options)
+        self.neo_summary = QLabel()
+        nh.addWidget(b)
+        nh.addWidget(self.neo_summary, 1)
+        f.addRow(tr("Neo Geo (YM2610):"), nr)
+        self._update_neo_summary()
+        # tamanho do XGM (o mesmo do menu Ferramentas → Tamanho do XGM)
+        from mdconv.export import optimize
+        self.vgm_size = QComboBox()
+        for code, name in optimize.MODES.items():
+            self.vgm_size.addItem(tr(name), code)
+            self.vgm_size.setItemData(self.vgm_size.count() - 1, tr(optimize.HINTS[code]), Qt.ItemDataRole.ToolTipRole)
+        self.sync_size_mode()
+        self.vgm_size.currentIndexChanged.connect(
+            lambda _i: self.main.set_size_mode(self.vgm_size.currentData()))
+        f.addRow(tr("Tamanho do XGM:"), self.vgm_size)
         # estilo de uma música de referência (mdconv/export/restyle.py)
         from mdconv.export.restyle import OPTIONS
         sr = QWidget()
@@ -450,6 +482,7 @@ class ToolsDialog(QDialog):
         self.qsettings.setValue("tools/vgm_loop_a", self.vgm_loop_a.value())
         self.qsettings.setValue("tools/vgm_loop_b", self.vgm_loop_b.value())
         self.qsettings.setValue("tools/vgm_pcm", self.vgm_pcm.value())
+        self.qsettings.setValue("tools/vgm_pcm_atten", self.vgm_atten.value())
         style = None
         opts = {k for k, cb in self.style_opts.items() if cb.isChecked()}
         self.qsettings.setValue("tools/style_on", "true" if self.style_on.isChecked() else "false")
@@ -475,11 +508,63 @@ class ToolsDialog(QDialog):
         if loop and b and b <= a:
             QMessageBox.warning(self, self.windowTitle(), tr("O fim do loop tem de vir depois do início."))
             return
+        dst = self._ask_out_dir(dst)
+        if dst is None:
+            return
         self.main.convert_vgm_job(files, dst, grid=self.vgm_grid.isChecked(), trim=self.vgm_trim.isChecked(),
                                   routing=routing or None, opl_routing=opl_routing or None,
                                   loop_start=a if loop else None,
                                   loop_end=(b or None) if loop else None, pcm_channel=self.vgm_pcm.value(),
-                                  style=style)
+                                  style=style, neo_options=self.neo_options(),
+                                  subfolders=getattr(self, "_subfolders", False),
+                                  pcm_atten_db=self.vgm_atten.value())
+
+    # ------------------------------------------------------------- opções do Neo Geo / tamanho
+    def neo_options(self) -> dict:
+        """Opções do Neo Geo salvas (as da aba Extração), com os padrões no que faltar."""
+        import json
+        from dataclasses import asdict
+
+        from mdconv import neogeo
+        opt = asdict(neogeo.Options())
+        try:
+            opt.update(json.loads(self.qsettings.value("extract/neo_options", "{}") or "{}"))
+        except (ValueError, TypeError):
+            pass
+        return asdict(neogeo.Options(**{k: (tuple(v) if k == "pcm_channels" else v) for k, v in opt.items()
+                                        if k in neogeo.Options.__dataclass_fields__}))
+
+    def edit_neo_options(self):
+        import json
+        from dataclasses import asdict
+
+        from mdconv import neogeo
+        from mdconv.gui.extract_tab import NeoOptionsDialog
+        dlg = NeoOptionsDialog(self.neo_options(), asdict(neogeo.Options()), self)
+        if dlg.exec():
+            self.qsettings.setValue("extract/neo_options", json.dumps(dlg.result_options()))
+            self._update_neo_summary()
+            self.main._log(tr("Opções do Neo Geo salvas."))
+
+    def _update_neo_summary(self):
+        o = self.neo_options()
+        self.neo_summary.setText(tr("PCM {0}; amostras até {1:.1f} s; volume em passos de {2:.0f} dB").format(
+            ", ".join(f"CH{c}" for c in o["pcm_channels"]), o["max_sample_s"], o["volume_step_db"]))
+
+    def sync_size_mode(self):
+        from mdconv.export import optimize
+        self.vgm_size.blockSignals(True)
+        self.vgm_size.setCurrentIndex(max(0, self.vgm_size.findData(optimize.mode())))
+        self.vgm_size.blockSignals(False)
+
+    def _ask_out_dir(self, dst: str):
+        """Pergunta se grava na pasta de saída ou numa pasta nova dentro dela. None = cancelado."""
+        from mdconv.gui.outdir import ask_out_dir
+        r = ask_out_dir(self, self.qsettings, dst, self.windowTitle())
+        if r is None:
+            return None
+        self._subfolders = r[2]
+        return r[0]
 
     def _browse_style(self):
         start = self.style_ref.text().strip() or self.qsettings.value("ay/dir", "") or str(Path.home())

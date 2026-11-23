@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 __version__ = "1.2.0"
 
@@ -257,6 +258,50 @@ def run_export(game, out_dir: str, **opts) -> str:
         return game.export(out_dir, **opts)
     from . import export
     return export.export_all(game, out_dir, **opts)
+
+
+def _merge_move(src: Path, dst: Path) -> None:
+    if src.is_dir() and dst.is_dir():
+        for item in list(src.iterdir()):
+            _merge_move(item, dst / item.name)
+        try:
+            src.rmdir()
+        except OSError:
+            pass
+    else:
+        if dst.exists() and dst.is_file():
+            dst.unlink()
+        os.replace(src, dst)
+
+
+def organize(base: str, flatten_into: str | None = None, per_song: bool = False) -> str:
+    """Arruma a pasta de uma extração. ``flatten_into``: a pasta que o usuário criou para o jogo — o
+    conteúdo de ``base`` (``<pasta>/<jogo>``) sobe para ela. ``per_song``: os arquivos de cada música
+    (XGM, VGM, .fur, prévia) saem de ``musicas`` e vão para uma pasta com o nome da música. Devolve a
+    pasta final."""
+    b = Path(base)
+    if flatten_into:
+        t = Path(flatten_into)
+        if b.resolve() != t.resolve() and b.parent.resolve() == t.resolve():
+            _merge_move(b, t)
+            b = t
+    m = b / "musicas"
+    if per_song and m.is_dir():
+        groups: dict[str, list[Path]] = {}
+        for f in m.iterdir():
+            if f.is_file():
+                stem = f.stem[:-len("_previa")] if f.stem.endswith("_previa") else f.stem
+                groups.setdefault(stem, []).append(f)
+        for stem, fs in groups.items():
+            d = b / stem
+            d.mkdir(exist_ok=True)
+            for f in fs:
+                _merge_move(f, d / f.name)
+        try:
+            m.rmdir()
+        except OSError:
+            pass
+    return str(b)
 
 
 @dataclass

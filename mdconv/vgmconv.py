@@ -1,6 +1,7 @@
 """Conversão direta de VGM/VGZ para o Mega Drive, chip a chip (sem MIDI).
 
-Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`), YM2203 / OPN (:mod:`mdconv.opn`), OPL — YM3526,
+Chips aceitos: AY-3-8910 (:mod:`mdconv.ay`), YM2203 / OPN (:mod:`mdconv.opn`), YM2610 do Neo Geo
+(:mod:`mdconv.neogeo`, a mesma conversão da extração da ROM), OPL — YM3526,
 YM3812, Y8950 (:mod:`mdconv.opl`) — e VGMs que já
 são do Mega Drive — YM2612 + SN76489 (:mod:`mdconv.mdvgm`, só reempacota). O chip é
 reconhecido pelo cabeçalho do VGM.
@@ -28,6 +29,8 @@ def detect_chip(path) -> str:
         return struct.unpack_from("<I", d, off)[0] & 0x3FFFFFFF if data > off + 3 else 0
     if clk(0x44):
         return "YM2203"
+    if clk(0x4C):
+        return "YM2610"
     if clk(0x74):
         return "AY-3-8910"
     from mdconv.mdvgm import is_md_vgm
@@ -40,19 +43,40 @@ def detect_chip(path) -> str:
              0x4C: "YM2610", 0x50: "YM3812", 0x98: "OKIM6295", 0xA0: "K054539"}
     found = [n for off, n in names.items() if clk(off)]
     raise ValueError("Chip não suportado na conversão direta"
-                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910, YM2203, OPL (YM3526, YM3812, Y8950) e Mega Drive "
+                     + (f" ({', '.join(found)})" if found else "") + ". Aceitos: AY-3-8910, YM2203, YM2610 (Neo Geo), OPL (YM3526, YM3812, Y8950) e Mega Drive "
                      "(YM2612 + SN76489).")
+
+
+_PCM_ATTEN_DB = 0.0          # atenuação do PCM da conversão em andamento (ver convert_file)
 
 
 def convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, wav=True, log=print,
                  trim=True, routing=None, loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None,
-                 style=None):
+                 style=None, neo_options=None, subfolder=False, pcm_atten_db=0.0):
+    """Ver :func:`_convert_file`. ``pcm_atten_db``: abaixa as amostras PCM (DAC) em tantos dB, para
+    equilibrar a bateria com a melodia (o XGM não tem volume por canal PCM: o ganho vai na amostra)."""
+    global _PCM_ATTEN_DB
+    old, _PCM_ATTEN_DB = _PCM_ATTEN_DB, float(pcm_atten_db or 0.0)
+    try:
+        return _convert_file(path, out_dir, name, grid, xgm, vgm, wav, log, trim, routing, loop_start, loop_end,
+                             pcm_channel, opl_routing, style, neo_options, subfolder)
+    finally:
+        _PCM_ATTEN_DB = old
+
+
+def _convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, wav=True, log=print,
+                  trim=True, routing=None, loop_start=None, loop_end=None, pcm_channel=1, opl_routing=None,
+                  style=None, neo_options=None, subfolder=False):
     """Converte um VGM/VGZ e grava XGM, VGM, .fur e prévia WAV. Devolve a lista de arquivos.
     ``routing``: rotas manuais dos canais do AY-3-8910 (ver :func:`mdconv.ay.convert.plan_routes`);
     ignoradas nos outros chips. ``loop_start``/``loop_end`` (segundos, contados do começo da música
     convertida): põem ou mudam o loop; ``loop_end`` corta a música ali. ``pcm_channel``: canal PCM
     do XGM das amostras de um VGM do Mega Drive. ``style``: (arquivo de referência, opções) — ver
-    :mod:`mdconv.export.restyle`."""
+    :mod:`mdconv.export.restyle`. ``neo_options``: opções do Neo Geo (dicionário de
+    :class:`mdconv.neogeo.Options`, as mesmas da extração) para VGM de YM2610. ``subfolder``: grava os
+    arquivos numa pasta com o nome da música, dentro de ``out_dir``."""
+    if subfolder:
+        out_dir = Path(out_dir or Path(path).parent) / (name or Path(path).name.split(".")[0])
     from mdconv.mdvgm import apply_loop
     path = Path(path)
     chip = detect_chip(path)
@@ -69,6 +93,16 @@ def convert_file(path, out_dir=None, name=None, grid=False, xgm=True, vgm=True, 
         stream, report = mdvgm.convert(src, pcm_channel=pcm_channel, trim=trim, loop_start=loop_start,
                                        loop_end=loop_end)
         return write_outputs(stream, report, src.gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
+    if chip == "YM2610":
+        from mdconv import neogeo
+        board, cap, gd3 = neogeo.read_vgm(path)
+        opt = neogeo.Options(**{k: (tuple(v) if k == "pcm_channels" else v)
+                                for k, v in (neo_options or {}).items()
+                                if k in neogeo.Options.__dataclass_fields__})
+        stream, report = neogeo.to_stream(board, cap, opt)
+        report = list(report) + list(cap.report)
+        apply_loop(stream, loop_start, loop_end, report)
+        return write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, style=style)
     if chip in ("YM3812", "YM3526", "Y8950"):
         from mdconv.opl.convert import convert as opl_convert, read_vgm as opl_read
         src = opl_read(path)
@@ -163,7 +197,7 @@ def write_exact_vgm(events, total, loop, path, title="", game="", author="", not
 
 
 def write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, exact=None, fur=True,
-                  style=None):
+                  style=None, pcm_atten_db=None):
     from mdconv.export.vgm import write_vgm
     from mdconv.export.xgm import write_xgm
     out = Path(out_dir) if out_dir else Path(path).parent
@@ -175,6 +209,13 @@ def write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, 
         from mdconv.export.restyle import apply_style, read_style
         ref = style[0] if hasattr(style[0], "algfb") else read_style(style[0])
         stream, styled = apply_style(stream, ref, style[1])
+    atten = _PCM_ATTEN_DB if pcm_atten_db is None else float(pcm_atten_db)
+    if atten > 0 and getattr(stream, "pcm_samples", None):
+        import numpy as np
+        g = 10 ** (-atten / 20)
+        stream.pcm_samples = {k: np.clip(np.round(np.asarray(v, np.float32) * g), -128, 127).astype(np.int8)
+                              for k, v in stream.pcm_samples.items()}
+        report = list(report) + [f"PCM (DAC) atenuado em {atten:g} dB"]
     from mdconv.export.optimize import optimize_stream
     stream, opt = optimize_stream(stream)
     for line in list(report) + styled + opt:

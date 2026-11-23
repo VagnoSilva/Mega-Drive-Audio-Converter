@@ -719,6 +719,10 @@ EN = {
         "OPL {0} and {1} → {2}",
     "Música VGM (AY / YM2203 / OPL / Mega Drive)":
         "VGM music (AY / YM2203 / OPL / Mega Drive)",
+    "Arquivos VGM / VGZ (AY-3-8910, YM2203, YM2610, OPL ou Mega Drive) ou XGM":
+        "VGM / VGZ files (AY-3-8910, YM2203, YM2610, OPL or Mega Drive) or XGM",
+    "VGM com AY-3-8910, YM2203, YM2610, OPL ou Mega Drive, ou XGM do SGDK":
+        "VGM with AY-3-8910, YM2203, YM2610, OPL or Mega Drive, or SGDK XGM",
     "Arquivos VGM / VGZ (AY-3-8910, YM2203, OPL ou Mega Drive) ou XGM":
         "VGM / VGZ files (AY-3-8910, YM2203, OPL or Mega Drive) or XGM",
     "VGM com AY-3-8910, YM2203, OPL ou Mega Drive, ou XGM do SGDK":
@@ -775,4 +779,22 @@ EN = {
         "PSG overflow: a note that would vanish for lack of a PCM channel is imitated on the PSG",
     "Quando o canal PCM está ocupado por uma nota que acabou de começar, a nova vai para um tom livre do PSG (onda quadrada na nota da amostra; bumbo e tons com a altura caindo; caixa no ruído, se ele estiver livre). Vozes e efeitos continuam no PCM. Soa mais simples que a amostra, mas melhor que silêncio — útil com um canal PCM só.":
         "When the PCM channel is busy with a note that has just started, the new one goes to a free PSG tone (square wave at the sample's pitch; bass drum and toms with falling pitch; snare on the noise, if it is free). Voices and effects stay on PCM. Simpler than the sample, but better than silence — useful with a single PCM channel.",
+    "Neo Geo (YM2610):": "Neo Geo (YM2610):",
+    "Canais PCM, chimbais no ruído, ADPCM-B no FM, duração e volume das amostras. São as mesmas opções da aba Extração: mudar aqui muda lá também.":
+        "PCM channels, hi-hats on the noise, ADPCM-B on FM, sample length and volume. These are the same options as the Extraction tab: changing them here changes them there too.",
+    "PCM {0}; amostras até {1:.1f} s; volume em passos de {2:.0f} dB": "PCM {0}; samples up to {1:.1f} s; volume in {2:.0f} dB steps",
+    "Tamanho do XGM:": "XGM size:",
+    "Onde gravar os arquivos convertidos?": "Where should the converted files go?",
+    "Pasta de saída: {0}": "Output folder: {0}",
+    "Na pasta de saída": "In the output folder",
+    "Numa pasta nova dentro dela…": "In a new folder inside it…",
+    "Nome da pasta a criar dentro de\n{0}:": "Name of the folder to create inside\n{0}:",
+    "Digite o nome da pasta.": "Type the folder name.",
+    "O nome não pode ter estes caracteres: < > : \" / \\ | ? *": "The name cannot contain these characters: < > : \" / \\ | ? *",
+    "Não consegui criar a pasta:\n{0}": "Could not create the folder:\n{0}",
+    "Uma pasta para cada música (com os arquivos dela dentro)": "One folder per song (with its files inside)",
+    "sem atenuação": "no attenuation",
+    "Atenuar o PCM (DAC):": "Attenuate PCM (DAC):",
+    "Abaixa o volume das amostras PCM (DAC) — bateria, vozes — em relação ao FM e ao PSG, quando elas soam altas demais. 6 dB = metade do volume. Vale para todos os chips (Mega Drive, Neo Geo…) e é gravado nas amostras do XGM.":
+        "Lowers the volume of the PCM (DAC) samples — drums, voices — relative to FM and PSG, when they sound too loud. 6 dB = half the volume. Applies to every chip (Mega Drive, Neo Geo…) and is baked into the XGM samples.",
 }

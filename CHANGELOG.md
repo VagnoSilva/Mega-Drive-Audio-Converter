@@ -2,6 +2,82 @@
 
 Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.10.0.
 
+## [0.11.4] — 2026-11-22
+
+### Novidades
+
+**Ferramentas → Música VGM**
+- **YM2610 (Neo Geo)**: VGM/VGZ de Neo Geo (vgmrips) entram na conversão direta. As escritas do chip e as amostras
+  de ADPCM-A/B que vêm dentro do VGM (blocos 0x82 e 0x83) passam pela mesma conversão da extração da ROM:
+  FM 1–4 → FM 1–4, SSG → PSG, ADPCM-A → PCM do XGM, ADPCM-B (com altura) → FM 5. Saem XGM, VGM, .fur e prévia.
+  Serve para comparar o VGM gravado do MAME com a música tirada da ROM e para jogos de Neo Geo que a extração
+  ainda não reconhece. Conferido com "Bloody (New Face Team)" do KOF '97. Avisos no registro para YM2610B (os
+  canais FM extras ficam de fora), 2º chip e VGM sem as amostras.
+- Botão **Opções do Neo Geo…**: as mesmas opções da aba Extração (canais PCM, chimbais no ruído, ADPCM-B no FM,
+  duração e volume das amostras), salvas no mesmo lugar — mudar numa aba muda na outra. Ao lado, um resumo do
+  que está valendo.
+- **Tamanho do XGM** na própria aba (Qualidade máxima, Equilibrado, Compacto): o mesmo do menu Ferramentas →
+  Tamanho do XGM, sincronizado com ele, e vale também para os VGZ de YM2610.
+- **Pasta de destino**: ao clicar em Converter, o programa pergunta se grava na pasta de saída ou numa pasta nova
+  dentro dela. Para a pasta nova, basta digitar o nome (nomes vazios ou com `< > : " / \ | ? *` são recusados).
+- **Aba Extração com a mesma pergunta**: ao clicar em Extrair, escolhe entre a pasta de saída e uma pasta nova
+  dentro dela (ex.: `saida\kof97`). Na pasta nova, as músicas, efeitos e vozes do jogo vão direto para ela (sem a
+  pasta automática com o nome do jogo). Com "Uma pasta para cada música", cada música sai numa pasta com o nome
+  dela (`saida\kof97\44_Musica_44\`), em vez de todas juntas em `musicas`.
+- **Atenuar o PCM (DAC)**: de 0 a 24 dB, para quando a bateria e as vozes soam muito mais altas que a melodia. O
+  ganho vai gravado nas amostras (o XGM não tem volume por canal PCM); FM e PSG não mudam. Vale para todos os chips
+  da aba e fica salvo. O registro mostra "PCM (DAC) atenuado em N dB".
+- **Uma pasta para cada música**: na mesma pergunta, a caixa "Uma pasta para cada música" (ligada por padrão, e o
+  programa lembra a escolha) grava os 4 arquivos de cada música (XGM, VGM, .fur e prévia) numa pasta com o nome
+  dela, dentro da pasta escolhida.
+
+### Mudanças
+
+- Opções do Neo Geo: o passo de volume de **3 dB saiu** (só aumentava a ROM e era o que estourava o limite de
+  amostras). Ficam 6 dB (padrão) e 12 dB (menos ROM); opções salvas com 3 dB passam a valer 6 dB, na aba Extração
+  e na conversão direta.
+
+### Correções
+
+**Extração — Neo Geo (KOF 94–98, Garou)**
+- **Notas de ADPCM sumindo na segunda metade das músicas**: quando as variações de volume das amostras passavam
+  do limite do XGM (63 amostras por música), as notas das amostras que aparecem por último ficavam de fora. No
+  "Bloody (New Face Team)" do KOF '97 (música 44), com passo de 3 dB, sumiam 12 batidas entre 70 s e 98 s; no
+  KOF '96, a música 36 perdia 14. Agora os volumes vizinhos da mesma amostra viram um só até caber (o registro
+  mostra quantos), e todas as notas tocam. Encontrado comparando a extração da ROM com o VGZ do vgmrips: FM e
+  escritas de ADPCM iguais nota a nota.
+
+**Música VGM — VGM do Mega Drive**
+- **PCM sem reamostrar quando a taxa já é ~14 kHz**: amostras de DAC a até 0,3% da taxa do XGM (ex.: 14 015 Hz dos
+  VGMs do Furnace) passam byte a byte, em vez de interpoladas — a interpolação apagava agudos (diferença de até 69
+  níveis por amostra). O registro mostra "cópia exata, sem reamostrar".
+
+**Exportação**
+- **Ida e volta VGM → XGM sem perder as amostras**: quando as amostras não se sobrepõem (um canal PCM, como nas
+  músicas que vêm do Furnace), o VGM gerado guarda cada amostra uma vez só e cada disparo aponta para o começo
+  dela, em vez de uma trilha misturada. Ao converter esse VGM de novo, as amostras originais voltam (antes viravam
+  poucas amostras enormes, de até 15 s, que o modo Compacto cortava em 0,55 s — as vozes sumiam). O VGM também
+  fica menor. Conferido: VGM → XGM → VGM → XGM com o PCM idêntico amostra a amostra.
+- Leitura de VGM do Mega Drive: um salto do 0xE0 no banco começa outra amostra; disparos cortados usam a amostra
+  inteira de que são o começo (e param no mesmo ponto); taxas medidas que diferem só alguns Hz contam como a mesma.
+- **VGM com PCM mudo**: na conversão de VGM do Mega Drive, o VGM gerado não ligava o DAC ($2B = $80), então os
+  players de VGM tocavam o FM 6 no lugar das amostras (vozes e bateria sumiam; o XGM e a prévia estavam certos).
+  Agora o VGM liga o DAC no começo sempre que tem PCM.
+- **Fim das músicas sem loop**: o desligamento final das notas mandava o key-off do FM 4 para um canal que não
+  existe e nunca desligava o FM 6. Agora desliga os 6 canais.
+
+### Diferenças conhecidas (extração da ROM × VGZ do vgmrips)
+
+- Andamento 0,4% mais lento na extração da ROM (≈0,4 s em 100 s); os timers do YM2610 conferem com a conta do chip,
+  a causa ainda não foi achada.
+- O loop achado pela repetição das notas pode começar mais tarde que o do VGZ (Bloody: 26 s × 8 s), com o mesmo
+  período: soa igual, só guarda alguns segundos a mais.
+
+### Testes
+
+- `tests/unit/test_neogeo.py`: leitura de VGM/VGZ de YM2610, conversão até o XGM com opções do Neo Geo, junção de
+  volumes no limite de 63 amostras e passos de volume aceitos (6 e 12 dB).
+
 ## [0.11.3] — 2026-11-21
 
 ### Novidades

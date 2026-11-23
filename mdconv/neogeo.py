@@ -528,6 +528,148 @@ def is_board_source(path) -> bool:
         return False
 
 
+def _rom_b(board) -> bytes:
+    """ROM do ADPCM-B. Na placa é a mesma das V (``vrom``); um VGM pode trazer as duas separadas."""
+    return getattr(board, "vrom_b", None) or board.vrom
+
+
+# ============================================================================ VGM do YM2610
+@dataclass
+class VgmBoard:
+    """O que :func:`to_stream` precisa de uma "placa" quando a música vem de um VGM gravado
+    (vgmrips, MAME): as ROMs de ADPCM que vêm dentro do próprio VGM."""
+    title: str
+    vrom: bytes                           # ADPCM-A (bloco 0x82)
+    vrom_b: bytes                         # ADPCM-B / DELTA-T (bloco 0x83)
+    clock: int = YM_CLOCK
+    ym2610b: bool = False
+
+
+# tamanho dos operandos de cada comando do VGM (os que não são do YM2610 são pulados)
+def _vgm_cmd_len(c: int) -> int:
+    if c in (0x4F, 0x50) or 0x30 <= c <= 0x3F:
+        return 1
+    if 0x40 <= c <= 0x4E or 0x51 <= c <= 0x5F or c == 0x61 or 0xA0 <= c <= 0xBF:
+        return 2
+    if c in (0x62, 0x63) or 0x70 <= c <= 0x8F:
+        return 0
+    if c == 0x68:
+        return 11
+    if 0xC0 <= c <= 0xDF:
+        return 3
+    if 0xE0 <= c <= 0xFF:
+        return 4
+    return {0x90: 4, 0x91: 4, 0x92: 5, 0x93: 10, 0x94: 1, 0x95: 4}.get(c, -1)
+
+
+def read_vgm(path):
+    """VGM/VGZ com YM2610 (Neo Geo) → (VgmBoard, Capture, gd3).
+
+    As escritas saem no mesmo formato da captura da ROM — (amostra, porta, reg, valor) —, então a
+    conversão para o Mega Drive é a mesma (:func:`to_stream`): a diferença entre os dois caminhos
+    fica só na origem das escritas (o VGM gravado do MAME × o programa de som rodando aqui)."""
+    import gzip
+    import struct
+    from mdconv.ay.convert import _gd3
+    d = Path(path).read_bytes()
+    if d[:2] == b"\x1f\x8b":
+        d = gzip.decompress(d)
+    if d[:4] != b"Vgm ":
+        raise ValueError("Não é um arquivo VGM/VGZ.")
+    ver = struct.unpack_from("<I", d, 8)[0]
+    rel = struct.unpack_from("<I", d, 0x34)[0] if ver >= 0x150 else 0
+    pos = 0x34 + rel if rel else 0x40
+    clk = struct.unpack_from("<I", d, 0x4C)[0] if pos > 0x4F else 0
+    if not clk & 0x3FFFFFFF:
+        raise ValueError("Este VGM não tem YM2610.")
+    total = struct.unpack_from("<I", d, 0x18)[0]
+    loop_rel = struct.unpack_from("<I", d, 0x1C)[0]
+    loop_ofs = 0x1C + loop_rel if loop_rel else None
+    gd3_rel = struct.unpack_from("<I", d, 0x14)[0]
+    gd3 = _gd3(d, 0x14 + gd3_rel if gd3_rel else 0)
+
+    roms = {0x82: bytearray(), 0x83: bytearray()}
+    writes = []
+    t = 0
+    loop = None
+    second = 0
+    while pos < len(d):
+        if loop_ofs is not None and loop is None and pos >= loop_ofs:
+            loop = t
+        c = d[pos]
+        if c == 0x66:
+            break
+        if c in (0x58, 0x59):
+            r, v = d[pos + 1], d[pos + 2]
+            ym = c - 0x58
+            # o registro de flags do ADPCM ($1C) e os timers ($24–$27) não são música (a captura
+            # da ROM também não os grava)
+            if not (ym == 0 and (r == 0x1C or 0x24 <= r <= 0x27)):
+                writes.append((t, ym, r, v))
+            pos += 3
+            continue
+        if c in (0xA8, 0xA9):                   # 2º YM2610: o Neo Geo só tem um
+            second += 1
+            pos += 3
+            continue
+        if c == 0x61:
+            t += struct.unpack_from("<H", d, pos + 1)[0]
+            pos += 3
+            continue
+        if c == 0x62:
+            t += 735
+            pos += 1
+            continue
+        if c == 0x63:
+            t += 882
+            pos += 1
+            continue
+        if 0x70 <= c <= 0x7F:
+            t += (c & 15) + 1
+            pos += 1
+            continue
+        if 0x80 <= c <= 0x8F:
+            t += c & 15
+            pos += 1
+            continue
+        if c == 0x67:
+            typ = d[pos + 2]
+            size = struct.unpack_from("<I", d, pos + 3)[0] & 0x7FFFFFFF
+            body = d[pos + 7: pos + 7 + size]
+            if typ in roms and len(body) >= 8:
+                rom_size, start = struct.unpack_from("<II", body, 0)
+                chunk = body[8:]
+                buf = roms[typ]
+                need = max(rom_size, start + len(chunk))
+                if len(buf) < need:
+                    buf.extend(bytes(need - len(buf)))
+                buf[start:start + len(chunk)] = chunk
+            pos += 7 + size
+            continue
+        n = _vgm_cmd_len(c)
+        if n < 0:
+            raise ValueError(f"comando 0x{c:02X} desconhecido no VGM (posição 0x{pos:X})")
+        pos += 1 + n
+    end = max(total, t)
+    report = []
+    if second:
+        report.append(f"⚠ {second} escritas para um 2º YM2610 ignoradas")
+    clock = clk & 0x3FFFFFFF
+    b = bool(clk & 0x80000000)
+    if b:
+        report.append("⚠ YM2610B: os canais FM 1 e 4 (que o YM2610 do Neo Geo não tem) ficam de fora")
+    if abs(clock - YM_CLOCK) > YM_CLOCK * 0.01:
+        report.append(f"⚠ clock do YM2610 = {clock} Hz (o Neo Geo usa {YM_CLOCK}); conversão feita como 8 MHz")
+    a_rom, b_rom = bytes(roms[0x82]), bytes(roms[0x83])
+    if not a_rom and not b_rom:
+        report.append("⚠ o VGM não traz as amostras de ADPCM: só FM e SSG")
+    report.append(f"ROMs de ADPCM no VGM: A {len(a_rom) // 1024} KB, B {len(b_rom) // 1024} KB")
+    title = gd3.get("jogo") or Path(path).stem
+    board = VgmBoard(title, a_rom or b_rom, b_rom or a_rom, clock, b)
+    cap = Capture(-1, writes, end, loop, report)
+    return board, cap, gd3
+
+
 # ============================================================================ ADPCM
 _A_STEPS = (16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143,
             157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
@@ -591,6 +733,10 @@ class Options:
     adpcm_b_to_fm: bool = True            # ADPCM-B (instrumento com altura) no FM 5
     min_level_db: float = -15.0           # notas de ADPCM mais baixas que isso (ecos) ficam de fora
     psg_overflow: bool = False            # nota que sumiria (canal PCM ocupado) vai para o PSG, imitada
+
+    def __post_init__(self):
+        # passos aceitos: 6 e 12 dB (o de 3 dB saiu: só aumentava a ROM). Opções salvas com 3 dB viram 6.
+        self.volume_step_db = 12.0 if float(self.volume_step_db) >= 9 else 6.0
 
 
 def to_stream(board: Board, cap: Capture, opt: Options | None = None):
@@ -700,7 +846,8 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         nonlocal n_metal
         raw_key = (kind, start, stop, rate)
         if raw_key not in cache:
-            seg = board.vrom[start:min(stop + 1, len(board.vrom))]
+            rom = board.vrom if kind == "a" else _rom_b(board)
+            seg = rom[start:min(stop + 1, len(rom))]
             x = decode_adpcm_a(seg) if kind == "a" else decode_adpcm_b(seg)
             x = x[: int(opt.max_sample_s * rate)]
             y = _resample(x, rate, PCM_RATE)
@@ -709,6 +856,17 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         y, metal = cache[raw_key]
         key = raw_key + (int(round(level_db / opt.volume_step_db)),)    # volume em passos
         return key, y, metal
+
+    remap = {}                            # (fonte, volume) → (fonte, volume) que cabe nas 63 amostras
+
+    def note_key(t, kind, start, stop, level_db, rate):
+        """A amostra que a nota vai usar no PCM (None: fica de fora, vai para o ruído ou é curta)."""
+        if -level_db < opt.min_level_db:
+            return None
+        key, y, metal = sample_for(kind, start, stop, level_db, rate)
+        if len(y) < 8 or (metal and use_noise):
+            return None
+        return key
 
     def start_pcm(t, kind, start, stop, level_db, rate):
         nonlocal dropped, quiet
@@ -719,6 +877,7 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         key, y, metal = sample_for(kind, start, stop, level_db, rate)
         if len(y) < 8:
             return
+        key = remap.get(key, key)
         gain = 10 ** (-key[-1] * opt.volume_step_db / 20)
         if metal and use_noise:
             env = _noise_envelope(y * gain * 0.7, PCM_RATE)
@@ -782,7 +941,12 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
         # sem altura definida (voz, efeito, batida): vai como amostra, na taxa em que toca
         pcm_notes += [(t, "b", start, stop, -20 * math.log10(max(level, 1) / 255), rate)
                       for t, start, stop, rate, level, _rep in rest]
-    for args in sorted(pcm_notes, key=lambda x: x[0]):
+    pcm_notes.sort(key=lambda x: x[0])
+    remap.update(fit_sample_slots([note_key(*a) for a in pcm_notes], 63))
+    if remap:
+        report.append(f"ADPCM: {len(remap)} variações de volume juntadas à mais próxima da mesma amostra "
+                      "(o XGM aceita 63 amostras por música)")
+    for args in pcm_notes:
         start_pcm(*args)
     if data:
         frames[0].insert(0, ("fm", 0, 0x2B, 0x80))
@@ -842,6 +1006,40 @@ def to_stream(board: Board, cap: Capture, opt: Options | None = None):
 # ============================================================================ transbordo para o PSG
 OVERFLOW_FRAMES = 4                       # nota no canal PCM há até 4 quadros (67 ms): seria cortada
 PSG_MIN_HZ = 3579545 / (32 * 1023)        # ≈ 109 Hz, a nota mais grave do tom do PSG
+
+
+def fit_sample_slots(keys, limit: int = 63) -> dict:
+    """Faz as amostras caberem no limite do XGM juntando volumes da mesma fonte, em vez de deixar de
+    fora as notas cujas amostras aparecem por último na música.
+
+    ``keys``: chave de cada nota, ``(…fonte, passo de volume)`` (None = não usa PCM). Enquanto houver
+    chaves demais, na fonte com mais variações de volume os dois passos mais próximos viram um só (o
+    mais tocado fica). Devolve {chave juntada: chave que fica}."""
+    from collections import Counter
+    use = Counter(k for k in keys if k is not None)
+    groups = {}
+    for k in use:
+        groups.setdefault(k[:-1], set()).add(k[-1])
+    remap = {}
+    total = len(use)
+    while total > limit:
+        cand = [g for g, v in groups.items() if len(v) > 1]
+        if not cand:
+            break                                  # fontes demais: o resto fica de fora
+        g = max(cand, key=lambda g: (len(groups[g]), -sum(use[g + (v,)] for v in groups[g])))
+        steps = sorted(groups[g])
+        i = min(range(len(steps) - 1),
+                key=lambda i: (steps[i + 1] - steps[i], use[g + (steps[i],)] + use[g + (steps[i + 1],)]))
+        a, b = g + (steps[i],), g + (steps[i + 1],)
+        keep, drop = (a, b) if use[a] >= use[b] else (b, a)
+        groups[g].discard(drop[-1])
+        use[keep] += use.pop(drop)
+        for k, v in remap.items():
+            if v == drop:
+                remap[k] = keep
+        remap[drop] = keep
+        total -= 1
+    return remap
 
 
 def _psg_free_frames(ssg_frames, n_frames: int) -> np.ndarray:
@@ -1028,7 +1226,8 @@ def adpcm_b_fm(board: Board, notes, stops, frames, frame_of, n_frames, end, fc: 
     for i, (t, start, stop, rate, level, rep) in enumerate(notes):
         src = (start, stop)
         if src not in info:
-            x = decode_adpcm_b(board.vrom[start:min(stop + 1, len(board.vrom))])
+            rom = _rom_b(board)
+            x = decode_adpcm_b(rom[start:min(stop + 1, len(rom))])
             per = _f0(x)
             info[src] = (per, sample_patch(x, per) if per else None, len(x))
         per, patch, n = info[src]

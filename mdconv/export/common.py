@@ -8,7 +8,7 @@ from mdconv.driver.driver import Stream
 
 def all_off_writes(fm_channels: int = 6) -> list[tuple]:
     """Encerra tudo: key-off nos 6 canais FM e volume mínimo nos 4 canais do PSG."""
-    w = [("fm", 0, 0x28, (c & 3) | (4 if c >= 3 else 0)) for c in (0, 1, 2, 3, 4, 5)]
+    w = [("fm", 0, 0x28, c if c < 3 else c + 1) for c in (0, 1, 2, 3, 4, 5)]     # 0–2, 4–6 (3 não existe)
     w += [("psg", b) for b in (0x9F, 0xBF, 0xDF, 0xFF)]
     return w
 

@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — versão 0.11.3
+# Mega Drive Audio Converter — versão 0.11.4
 
 *Read in English: [README.en.md](README.en.md)*
 
@@ -33,6 +33,16 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 `python -m mdconv.cli --version`).
 
 ## Histórico de versões
+
+**0.11.4**
+- **Neo Geo (YM2610) na aba Música VGM**: VGM/VGZ do vgmrips passam pela mesma conversão da extração
+  da ROM (`neogeo.read_vgm` → `neogeo.to_stream`), com as amostras de ADPCM-A/B que vêm no VGM (blocos
+  0x82/0x83). Botão "Opções do Neo Geo…" (as mesmas da aba Extração) e "Tamanho do XGM" na própria aba.
+- **Pasta de destino**: ao converter, escolhe entre a pasta de saída ou uma pasta nova dentro dela.
+- **Correção — notas de ADPCM sumindo** (KOF 94–98, Garou): no limite de 63 amostras do XGM, volumes
+  vizinhos da mesma amostra viram um só (`neogeo.fit_sample_slots`) em vez de as últimas amostras
+  ficarem de fora (Bloody/KOF '97: 12 batidas a menos entre 70 e 98 s).
+- Passo de volume de 3 dB removido das Opções do Neo Geo (ficam 6 e 12 dB).
 
 **0.11.3**
 - **Neo Geo — Garou: Mark of the Wolves** (`garou.zip`): o programa de som é o "Sound Driver(ROM)

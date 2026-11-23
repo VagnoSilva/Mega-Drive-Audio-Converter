@@ -42,6 +42,31 @@ def _gd3(title: str, game: str, author: str, notes: str) -> bytes:
     return b"Gd3 " + struct.pack("<II", 0x100, len(body)) + body
 
 
+def _separate_hits(stream: Stream, frames) -> list | None:
+    """Disparos de PCM como (início, fim, amostra) na taxa do PCM, se nunca soam dois ao mesmo tempo;
+    None se algum se sobrepõe (aí o VGM, que tem um DAC só, precisa da trilha misturada)."""
+    rate = stream.pcm_rate
+    n = int(np.ceil(len(frames) / stream.fps * rate)) + 1
+    by_ch: dict[int, list] = {}
+    for f, writes in enumerate(frames):
+        for w in writes:
+            if w[0] == "pcm":
+                by_ch.setdefault(w[1], []).append((int(round(f / stream.fps * rate)), w[2], f))
+    segs = []
+    for evs in by_ch.values():
+        for i, (start, sid, f) in enumerate(evs):
+            if sid == 0:
+                continue
+            stop = evs[i + 1][0] if i + 1 < len(evs) else n
+            end = min(start + len(stream.pcm_samples[sid]), stop, n)
+            if end > start:
+                segs.append((start, end, sid, f))
+    segs.sort()
+    if any(segs[k + 1][0] < segs[k][1] for k in range(len(segs) - 1)):
+        return None
+    return segs
+
+
 def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str = "",
               notes: str = "") -> VgmInfo:
     frames, loop_frame = export_frames(stream)
@@ -56,6 +81,11 @@ def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str
     # Linha do tempo em amostras de 44,1 kHz: (amostra, ordem, comando)
     events: list[tuple[int, int, bytes]] = []
     pre = loop_prefix(stream, frames, loop_frame)
+    if has_pcm and not any(w[0] == "fm" and w[1] == 0 and w[2] == 0x2B and w[3] & 0x80
+                           for fr in frames for w in fr):
+        # o DAC precisa estar ligado ($2B = $80) para o PCM soar; no XGM quem liga é o driver, e o fluxo
+        # convertido não traz essa escrita (sem ela, os players de VGM tocam o FM 6 no lugar do PCM)
+        events.append((0, -2, b"\x52\x2B\x80"))
     for f, writes in enumerate(frames):
         t = int(round(f * spf))
         for j, w in enumerate(writes):
@@ -66,7 +96,33 @@ def write_vgm(stream: Stream, path, title: str = "", game: str = "", author: str
                 events.append((t, order, bytes([0x52 + w[1], w[2], w[3] & 0xFF])))
             elif w[0] == "psg":
                 events.append((t, order, bytes([0x50, w[1] & 0xFF])))
-    if has_pcm:
+    segs = _separate_hits(stream, frames) if has_pcm else None
+    if segs is not None:
+        # um disparo de cada vez (nada se sobrepõe): o banco guarda cada amostra uma vez só e cada disparo
+        # vira um 0xE0 para o começo dela. Quem ler o VGM (inclusive este conversor) acha as amostras
+        # originais, em vez de uma trilha misturada — e o banco fica bem menor.
+        step = VGM_RATE / stream.pcm_rate
+        bank, offs = bytearray(), {}
+        for sid in sorted({sg[2] for sg in segs}):
+            offs[sid] = len(bank)
+            bank += (stream.pcm_samples[sid].astype(np.int16) + 128).astype(np.uint8).tobytes() + b"\x80"
+        pcm_u8 = np.frombuffer(bytes(bank), np.uint8)
+        loop_pcm = None if loop_frame is None else int(round(loop_frame / stream.fps * stream.pcm_rate))
+        spf_ = VGM_RATE / stream.fps
+        for k, (a, b, sid, f) in enumerate(segs):
+            t0 = int(round(f * spf_))                  # o 1º byte cai no começo exato do quadro
+            at = lambda j: t0 + int(round((j - a) * step))
+            parts = [(a, b)]
+            if loop_pcm is not None and a < loop_pcm < b:
+                parts = [(a, loop_pcm), (loop_pcm, b)]
+            for pa, pb in parts:
+                nxt = segs[k + 1][0] if k + 1 < len(segs) else None
+                if pb == b and nxt != b:
+                    pb += 1                         # o byte de silêncio depois da amostra (DAC parado em 0x80)
+                events.append((at(pa), 1, b"\xE0" + struct.pack("<I", offs[sid] + pa - a)))
+                for j in range(pa, pb):
+                    events.append((at(j), 2, b"\x80"))
+    elif has_pcm:
         step = VGM_RATE / stream.pcm_rate
         # só onde há som PCM (economiza bytes); fora disso o DAC fica em 0x80 (silêncio)
         active = np.flatnonzero(pcm != 0)

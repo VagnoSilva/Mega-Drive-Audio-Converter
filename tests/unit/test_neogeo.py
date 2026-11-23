@@ -137,3 +137,66 @@ def test_overflow_option_keeps_notes_from_vanishing():
             assert len(pcm) == 1 and psg and any("Transbordo" in r for r in rep)
         else:
             assert len(pcm) == 2 and not psg
+
+
+def _ym2610_vgm(tmp_path, gz=False):
+    """VGM mínimo de YM2610: amostra de ADPCM-A no bloco 0x82, uma nota FM e uma batida de ADPCM-A."""
+    import gzip
+    import struct
+    rom = bytes([0x77] * 0x100 + [0xFF] * 0x100)
+    body = bytearray()
+    body += b"\x67\x66\x82" + struct.pack("<III", 8 + len(rom), 0x400, 0) + rom
+    body += b"\x58\x24\x00\x58\x1C\xBF"                        # timer e flags: não entram
+    body += b"\x58\xA4\x22\x58\xA0\x69\x58\x28\xF1"             # nota no canal FM 1 do YM2610
+    body += b"\x59\x10\x00\x59\x18\x00\x59\x20\x00\x59\x28\x00"  # ADPCM-A canal 1: 0x000–0x1FF
+    body += b"\x59\x01\x3F\x59\x08\xDF\x59\x00\x01"             # volume e disparo
+    loop_at = len(body)
+    body += b"\x61\x44\xAC\x62\x66"                             # 44 100 + 735 amostras
+    head = bytearray(0x100)
+    head[0:4] = b"Vgm "
+    struct.pack_into("<I", head, 0x08, 0x171)
+    struct.pack_into("<I", head, 0x18, 44100 + 735)
+    struct.pack_into("<I", head, 0x1C, 0x100 + loop_at - 0x1C)
+    struct.pack_into("<I", head, 0x34, 0x100 - 0x34)
+    struct.pack_into("<I", head, 0x4C, 8_000_000)
+    data = bytes(head) + bytes(body)
+    p = tmp_path / ("t.vgz" if gz else "t.vgm")
+    p.write_bytes(gzip.compress(data) if gz else data)
+    return p
+
+
+def test_read_ym2610_vgm(tmp_path):
+    from mdconv.vgmconv import detect_chip
+    p = _ym2610_vgm(tmp_path, gz=True)
+    assert detect_chip(p) == "YM2610"
+    board, cap, _ = neogeo.read_vgm(p)
+    assert len(board.vrom) == 0x400 and board.vrom[:2] == b"\x77\x77" and board.vrom_b == board.vrom
+    assert not any(ym == 0 and (r == 0x1C or r == 0x24) for _, ym, r, _ in cap.writes)
+    assert (0, 0, 0x28, 0xF1) in cap.writes and cap.end == 44100 + 735 and cap.loop == 0
+    stream, report = neogeo.to_stream(board, cap, neogeo.Options(metals_to_noise=False))
+    pcm = [w for f in stream.frames for w in f if w[0] == "pcm" and w[2]]
+    assert pcm and any("FM 1" in r for r in report)
+
+
+def test_convert_ym2610_vgm_writes_xgm(tmp_path):
+    from mdconv.vgmconv import convert_file
+    p = _ym2610_vgm(tmp_path)
+    out = convert_file(p, tmp_path / "out", wav=False, log=lambda *_: None,
+                       neo_options={"pcm_channels": [3], "nao_existe": 1})
+    assert any(f.suffix == ".xgm" for f in out)
+
+
+def test_fit_sample_slots_merges_volumes_instead_of_dropping_notes():
+    # 3 fontes com 30 volumes cada (90 chaves) → 63: nenhuma fonte some, volumes vizinhos juntam
+    keys = [("a", s, 0, 18518.0, v) for s in range(3) for v in range(30)] + [None]
+    remap = neogeo.fit_sample_slots(keys, 63)
+    left = {remap.get(k, k) for k in keys if k is not None}
+    assert len(left) == 63 and {k[1] for k in left} == {0, 1, 2}
+    assert all(abs(remap[k][-1] - k[-1]) <= 3 and remap[k][:-1] == k[:-1] for k in remap)
+    assert neogeo.fit_sample_slots(keys[:10], 63) == {}
+
+
+def test_volume_step_only_6_or_12_db():
+    assert neogeo.Options(volume_step_db=3.0).volume_step_db == 6.0      # opção antiga salva
+    assert neogeo.Options(volume_step_db=12.0).volume_step_db == 12.0
+    assert neogeo.Options().volume_step_db == 6.0

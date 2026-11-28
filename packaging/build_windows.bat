@@ -1,14 +1,17 @@
 @echo off
 rem Gera o executavel do Mega Drive Audio Converter (Windows x64).
 rem Rode na pasta raiz do projeto (onde esta o run_gui.py):  packaging\build_windows.bat
-rem Precisa so do Python 3.10 a 3.13 de 64 bits (python.org, marcando "Add python.exe to PATH").
+rem Precisa so do Python 3.10 ou mais novo, de 64 bits (recomendado 3.12) (python.org, marcando "Add python.exe to PATH").
 rem As bibliotecas (numpy, scipy, PySide6, PyInstaller) sao instaladas num ambiente separado
 rem (.venv-build), sem mexer no Python do sistema. Nao precisa de compilador de C: as DLLs ja vem prontas.
 setlocal
 cd /d "%~dp0.."
 
 where python >nul 2>nul || (echo *** Python nao encontrado. Instale o Python 3.12 de 64 bits marcando "Add python.exe to PATH". & goto :erro)
-python -c "import struct,sys; sys.exit(0 if struct.calcsize('P')==8 and (3,10)<=sys.version_info[:2]<=(3,13) else 1)" || (echo *** Use o Python 3.10 a 3.13 de 64 bits ^(recomendado: 3.12^). & goto :erro)
+python -c "import sys; print('Python', sys.version.split()[0], '(%d bits)' %% (64 if sys.maxsize > 2**32 else 32))"
+python -c "import sys; sys.exit(0 if sys.maxsize > 2**32 else 1)" || (echo *** Este Python e de 32 bits: instale o Python de 64 bits ^(recomendado: 3.12^). & goto :erro)
+python -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3,10) else 1)" || (echo *** Python antigo demais: use o 3.10 ou mais novo ^(recomendado: 3.12^). & goto :erro)
+python -c "import sys; sys.exit(0 if sys.version_info[:2] <= (3,13) else 1)" || echo Aviso: Python mais novo que o 3.13. Deve funcionar; se o pip nao achar o PySide6 para ele, instale o 3.12.
 
 rem DLLs dos emuladores: existem e foram geradas a partir dos fontes atuais?
 python tools\check_native.py || goto :erro

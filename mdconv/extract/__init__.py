@@ -1,6 +1,6 @@
 """Extrator de áudio (aba "Extração"): MIDI + SoundFont de jogos Capcom CPS1 e Game Boy Advance, e
 Moon Patrol, Kung-Fu Master e Lode Runner (scripts da ROM de som), Ghosts 'n Goblins, Nemesis e
-Neo Geo (placa de som emulada) direto para o Mega Drive.
+Neo Geo (placa de som emulada) direto para o Mega Drive, e jogos do próprio Mega Drive (68000 emulado).
 
 Mesmo código do *Extrator de Áudio CPS1/GBA* independente (pasta ``cps1_extractor``), embutido
 no conversor. A parte de CPS1 é um port do VGMTrans (licença zlib, ver LICENSE-VGMTrans.txt).
@@ -163,6 +163,52 @@ class NeoGeoGame:
         return base
 
 
+class MegaDriveGame:
+    """Mega Drive: o driver de som do jogo roda no 68000 ou no Z80 emulados (mdconv.megadrive) e o que ele
+    escreve no YM2612 e no PSG é gravado como está."""
+    format = "Direto"
+
+    def __init__(self, path: str):
+        from mdconv import megadrive
+        self.path = path
+        self.board = megadrive.load_board(path)
+        self.name = self.board.p.get("short", self.board.title)
+        self.warnings = []
+        if getattr(self.board, "compat_note", ""):
+            self.warnings.append(self.board.compat_note)
+        if self.board.p.get("driver") == "boot":
+            self.warnings.append("Perfil criado pela análise automática: confira as prévias. Alguns números podem "
+                                 "ser variações ou ruído (o driver lendo dados que não são música).")
+
+    def songs(self):
+        return [(c, None, 1) for c in self.board.musics]
+
+    def label(self, sid: int) -> str:
+        return f"Som {sid:02d}" + (f": {self.board.p['names'][sid]}" if sid in self.board.p.get("names", {}) else "")
+
+    def summary(self) -> str:
+        cpu = "Z80" if self.board.p.get("driver") == "z80" else "68000"
+        return (f"{self.board.title} ({self.board.p['board']}) · {len(self.board.musics)} músicas, vinhetas e "
+                f"efeitos · o driver de som do jogo roda no {cpu} emulado; sai XGM, VGM, .fur e prévia")
+
+    def export(self, out_dir: str, song_ids=None, log=print, progress=None, **_opts) -> str:
+        from mdconv import megadrive
+        base = os.path.join(out_dir, self.name.replace(" ", "_").replace("'", ""))
+        megadrive.export_board(self.board, base, select=song_ids, log=log, progress=progress)
+        from mdconv.vgmconv import output_formats
+        names = {"xgm": "XGM", "vgm": "VGM", "fur": ".fur", "wav": "prévia"}
+        what = ", ".join(names[f] for f in ("xgm", "vgm", "fur", "wav") if f in output_formats())
+        log(f"✔ Pronto em {base}: musicas ({what} de cada uma)")
+        return base
+
+
+def is_megadrive(path: str) -> bool:
+    if not path or os.path.isdir(path):
+        return False
+    from mdconv import megadrive
+    return megadrive.is_board_source(path)
+
+
 def is_neogeo(path: str) -> bool:
     if not path or os.path.isdir(path) or not path.lower().endswith(".zip"):
         return False
@@ -184,8 +230,15 @@ def is_capcom_opn(path: str) -> bool:
     return capcom_opn.is_board_source(path)
 
 
+def _md_ext(path: str) -> bool:
+    from mdconv.megadrive import EXTS
+    return bool(path) and path.lower().endswith(EXTS)
+
+
 def is_direct(path: str) -> bool:
-    return is_irem(path) or is_capcom_opn(path) or is_konami(path) or is_neogeo(path)
+    if _md_ext(path):
+        return is_megadrive(path)
+    return is_irem(path) or is_capcom_opn(path) or is_konami(path) or is_neogeo(path) or is_megadrive(path)
 
 
 def is_irem(path: str) -> bool:
@@ -199,7 +252,9 @@ is_moon_patrol = is_irem
 
 
 def open_rom(path: str, game: str | None = None):
-    """Abre a ROM (zip/pasta da CPS1, .gba ou Moon Patrol). Devolve o objeto do jogo."""
+    """Abre a ROM (zip/pasta da CPS1, .gba, Mega Drive ou placas emuladas). Devolve o objeto do jogo."""
+    if _md_ext(path) and is_megadrive(path):
+        return MegaDriveGame(path)
     if is_irem(path):
         return IremGame(path)
     if is_capcom_opn(path):
@@ -208,6 +263,8 @@ def open_rom(path: str, game: str | None = None):
         return KonamiGame(path)
     if is_neogeo(path):
         return NeoGeoGame(path)
+    if is_megadrive(path):
+        return MegaDriveGame(path)
     from . import export
     return export.open_game(path, game or None)
 
@@ -238,7 +295,7 @@ def song_label(game, sid: int) -> str:
 
 
 def summary(game) -> str:
-    if isinstance(game, (CapcomOpnGame, KonamiGame, NeoGeoGame)):
+    if isinstance(game, (CapcomOpnGame, KonamiGame, NeoGeoGame, MegaDriveGame)):
         return game.summary()
     if platform(game) == "Direto":
         p = game.board.p

@@ -1,4 +1,4 @@
-# Gera o executável do Mega Drive Audio Converter no GitHub (Windows), sem precisar do seu PC.
+# Gera o executável do Mega Drive Audio Converter no GitHub (Windows e Linux), sem precisar do seu PC.
 # - Manual: aba Actions → "Executável Windows" → Run workflow. O zip fica em "Artifacts".
 # - Com tag (ex.: v0.2): além disso, cria o Release com o zip anexado.
 name: Executável Windows
@@ -21,6 +21,9 @@ jobs:
         with:
           python-version: "3.12"   # roda em Windows 8.1, 10 e 11 (64 bits)
 
+      - name: DLLs geradas dos fontes atuais
+        run: python tools/check_native.py
+
       - name: Dependências
         run: python -m pip install --upgrade pip numpy scipy PySide6 pyinstaller pytest
 
@@ -40,6 +43,8 @@ jobs:
           --add-data "mdconv\chips\native\nuked_opn2\nuked_wrap.c;mdconv\chips\native\nuked_opn2"
           --add-data "mdconv\chips\native\nuked_opn2\LICENSE;mdconv\chips\native\nuked_opn2"
           --add-data "mdconv\chips\native\nuked_opn2\README.txt;mdconv\chips\native\nuked_opn2"
+          --add-data "mdconv\chips\native\md68k\md68k.dll;mdconv\chips\native\md68k"
+          --add-data "mdconv\chips\native\md68k\musashi\LICENSE.txt;mdconv\chips\native\md68k\musashi"
           --collect-submodules mdconv
           run_gui.py
 
@@ -49,6 +54,7 @@ jobs:
           if (Test-Path Manual_Mega_Drive_Audio_Converter.pdf) { Copy-Item Manual_Mega_Drive_Audio_Converter.pdf dist\MegaDriveAudioConverter\ }
           if (Test-Path LICENSE) { Copy-Item LICENSE dist\MegaDriveAudioConverter\ }
           if (Test-Path dist\MegaDriveAudioConverter\_internal\python312.dll) { "python312.dll ok" } else { throw "python312.dll ausente no pacote" }
+          if (Test-Path dist\MegaDriveAudioConverter\_internal\mdconv\chips\native\md68k\md68k.dll) { "md68k.dll ok" } else { throw "md68k.dll ausente no pacote (extração de Mega Drive)" }
           Compress-Archive -Path dist\MegaDriveAudioConverter -DestinationPath dist\MegaDriveAudioConverter-windows-x64.zip
 
       - name: Teste rápido do executável (abre e confere as DLLs)
@@ -75,3 +81,28 @@ jobs:
           body: |
             Extraia o zip e rode **MegaDriveAudioConverter.exe** de dentro da pasta extraída
             (ao lado da pasta `_internal`). Requer Windows 8.1, 10 ou 11 de 64 bits.
+
+  # Versão para Linux x64 (Arch, Ubuntu, Fedora…). Feita no Ubuntu 22.04 para rodar também em
+  # distribuições mais antigas; no Arch (sempre mais novo) funciona direto.
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Executável
+        run: sh packaging/build_linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MegaDriveAudioConverter-linux-x64
+          path: dist/MegaDriveAudioConverter-linux-x64.tar.gz
+
+      - name: Release (só quando houver tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MegaDriveAudioConverter-linux-x64.tar.gz

@@ -360,18 +360,21 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
             if big[1] == k[1] and big[0].startswith(k[0]):
                 canon[k] = big
                 break
+    used_ch = set()
     for h in v.hits:
         f = max(first, frame(h[0]))
         if f >= n_frames:
             continue
+        ch = h[3] if len(h) > 3 and h[3] else pcm_channel      # disparo com canal próprio (extração)
         if h[1] is None:
-            frames[f].append(("pcm", pcm_channel, 0, 3))
+            frames[f].append(("pcm", ch, 0, 3))
             continue
+        used_ch.add(ch)
         key = (h[1].rstrip(b"\x80") or h[1], rk(h[2]))
         if key in canon:
             stop = int(round((h[0] + len(key[0]) * VGM_RATE / h[2]) * FPS / VGM_RATE))
             if f < stop < n_frames:
-                frames[max(first, stop)].append(("pcm", pcm_channel, 0, 3))
+                frames[max(first, stop)].append(("pcm", ch, 0, 3))
             key = canon[key]
         if key not in ids:
             if len(ids) >= MAX_SAMPLES:
@@ -379,7 +382,7 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
                 continue
             ids[key] = len(ids) + 1
             samples[ids[key]] = _resample(key[0], h[2])
-        frames[f].append(("pcm", pcm_channel, ids[key], 3))
+        frames[f].append(("pcm", ch, ids[key], 3))
     frames = frames[first:]
     if frames:
         frames[0] = pre + frames[0]
@@ -389,7 +392,9 @@ def convert(v: MdVgm, pcm_channel: int = 1, trim: bool = True, loop_start: float
     if samples:
         kb = sum(len(s) for s in samples.values()) / 1024
         rates = sorted({round(k[1]) for k in ids})
-        report.append(f"PCM: {len(samples)} amostra(s), {kb:.0f} KB a 14 kHz, no canal PCM {pcm_channel} "
+        chs = sorted(used_ch) or [pcm_channel]
+        where = f"no canal PCM {chs[0]}" if len(chs) == 1 else "nos canais PCM " + ", ".join(map(str, chs))
+        report.append(f"PCM: {len(samples)} amostra(s), {kb:.0f} KB a 14 kHz, {where} "
                       f"(taxas originais: {', '.join(map(str, rates))} Hz"
                       + ("; cópia exata, sem reamostrar" if all(abs(r / PCM_RATE - 1) <= EXACT_RATE_TOL for r in rates)
                          else "") + ")")

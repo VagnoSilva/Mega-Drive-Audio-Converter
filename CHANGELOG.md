@@ -2,6 +2,98 @@
 
 Todas as mudanças importantes do Mega Drive Audio Converter desde a versão 0.10.0.
 
+## [0.12.0] — 2026-11-25
+
+### Novidades
+
+- **Analisar ROM agora entende drivers no 68000** (Sonic 1 e parecidos): acha sozinha a rotina do driver
+  que o VBlank chama (pela pilha no momento das notas) e o byte da RAM onde o jogo pede a música; na
+  extração só o driver roda, quadro a quadro, sem o jogo atrapalhar.
+- A análise aperta Start durante o boot (passa telas de título) e repete o mesmo boot na extração.
+- Vinhetas curtas (sem loop) também entram na lista de músicas; a extração espera até 15 s pela primeira nota.
+- Emulador: interrupção do HBlank (nível 4) do VDP — Michael Jackson's Moonwalker passa a rodar e tocar.
+- Análise: reconhece jogos em que o 68000 segue a música e o Z80 só toca as notas (Mortal Kombat 1 e 2)
+  e pedidos de música cujo valor "vazio" não é zero (Moonwalker).
+
+- **Linux**: `packaging/build_linux.sh` gera o executável de Linux x64; `packaging/arch/PKGBUILD` instala
+  no Arch com `makepkg -si` (atalho no menu e comando `megadrive-audio-converter`); o GitHub também passa
+  a gerar o `MegaDriveAudioConverter-linux-x64.tar.gz`.
+
+- **Outras versões da mesma ROM** (tradução, patch de região, revisão — checksum diferente): o conversor
+  testa o perfil do jogo nela (toca duas músicas por alguns segundos) e, se funcionar, usa e guarda a
+  aprovação em `versoes_testadas.json`, na pasta dos perfis. Se não funcionar, avisa e oferece a análise.
+
+- **Pasta `perfis_megadrive/` no projeto**: os perfis de jogos vão junto com o conversor (Windows,
+  Linux, AppImage, Arch), então quem baixar já extrai esses jogos; para contribuir, basta copiar o
+  `.json` da análise para essa pasta. Já vem com Sonic 1, Mortal Kombat 1, 2, 3 e Ultimate 3,
+  Moonwalker, Aladdin e Thunder Force III. Perfis na pasta do usuário têm prioridade.
+- **Escolher os arquivos de cada música**: caixas XGM / VGM / Furnace (.fur) / Prévia (.wav) na aba
+  Extração (Mega Drive, Neo Geo, arcades) e em Ferramentas → Música VGM; só o que estiver marcado é
+  gerado (mais rápido e ocupa menos espaço). A escolha fica salva.
+- **Aba "Catálogo Mega Drive"**: lista de 1.377 jogos (nome, franquia, região, tipo, se já tem perfil)
+  com filtros por letra, tipo, franquia, situação e busca. Cada jogo tem uma bolinha: cinza (não
+  testado), verde (funciona), vermelho (não funciona) e amarelo (analisado, falta ouvir); clique para
+  trocar, botão direito para observação. A ROM aberta na Extração é reconhecida pelo vínculo salvo,
+  pelo nome do arquivo ou sugerida pelo nome (confirmar), e pode ser vinculada à mão a qualquer jogo
+  da lista (ou a um jogo novo). Abrir com perfil / analisar com sucesso / falhar atualizam a bolinha do
+  jogo vinculado. **Exportar CSV** gera a planilha (com código do cartucho, checksum e erro da análise)
+  para mandar a quem mantém o conversor. O catálogo é `perfis_megadrive/catalogo_megadrive.json`
+  (gerado por `tools/make_catalog.py` a partir de uma pasta de ROMs); as marcações ficam na pasta do
+  usuário.
+- **Botão "Perfis do Mega Drive…"** (aba Extração): salvar o perfil do jogo carregado para compartilhar,
+  exportar todos os seus perfis, importar um perfil recebido e abrir a pasta dos perfis — sem precisar
+  achar a pasta do AppData/.config. Rodando do código-fonte, também copia direto para `perfis_megadrive/`.
+- Análise: drivers que o jogo chama direto (`jsr` com o número do som em D0), como o de **Streets of
+  Rage 2** (26 músicas); jogos que mandam o número da música junto com o programa do Z80, como
+  **Altered Beast**. Perfis em `perfis_megadrive/` (também **Streets of Rage 1 e 3**).
+- Análise: pedido na RAM que o driver reescreve todo quadro (Streets of Rage 1); entre vários pedidos
+  diretos (música, efeitos, vozes), escolhe o que toca música (Streets of Rage 3); música da abertura
+  com só 3 canais FM também conta.
+- Análise: quando o título no cartucho é ilegível (alguns japoneses), usa o nome do arquivo da ROM.
+- **Compilação**: `COMPILAR.md` explica Windows, Linux (AppImage, pasta, pacote do Arch) e GitHub;
+  `build_windows.bat` confere o Python (64 bits, 3.10–3.13), usa ambiente separado, confere se as DLLs
+  foram geradas dos fontes atuais (`tools/check_native.py`) e já sai com o zip para distribuir;
+  `.gitattributes` fixa os finais de linha dos scripts (LF no Linux, CRLF no Windows).
+
+### Correções
+
+- Ferramentas — conversores e efeitos: a janela ficava mais alta que a tela e o botão **Converter**
+  saía do alcance. Agora cada aba rola, o botão de ação fica fixo embaixo e a janela abre do tamanho da
+  tela e pode ser redimensionada.
+- O executável gerado pelo GitHub não levava a `md68k.dll` (extração de Mega Drive não funcionava nele);
+  o workflow agora inclui a DLL e confere se ela está no pacote. Versão do pyproject atualizada para 0.12.0.
+
+**Extração — jogos do Mega Drive**
+- A aba Extração aceita **ROMs de Mega Drive** (.md, .bin, .gen, .smd ou .zip com uma delas). O 68000 do
+  console é emulado (núcleo Musashi) e roda o **driver de som do próprio jogo**: o programa chama a
+  inicialização, pede cada música e atualiza o som uma vez por quadro, como o jogo faz no VBlank. Tudo o
+  que o jogo escreve no YM2612 e no PSG é gravado sem alteração — a música já é do Mega Drive, então não há
+  conversão de chip nem perda de timbre.
+- Primeiro jogo: **Street Fighter II' Special Champion Edition** (40 entradas, entre músicas, vinhetas e
+  efeitos). O loop de cada música é achado sozinho (pelo comando de "goto" do driver).
+- **Bateria e vozes (PCM)**: no XGM, as amostras originais do jogo vão para os canais PCM 1 e 2 (os canais
+  3 e 4 ficam livres para o seu jogo). No VGM, o PCM sai misturado como o Z80 do jogo faz (dois canais
+  somados, ~5,2 kHz), com o tempo exato do console.
+- Segundo jogo: **Thunder Force IV** (48 músicas). O driver da Technosoft roda no **Z80**, agora emulado em C junto
+  com o 68000 (com a janela de banco da ROM, a interrupção do VBlank e os timers do YM2612). O programa pede a
+  música e liga o loop como o jogo faz; o loop é achado pelo fim de cada faixa.
+- Terceiro jogo: **Sonic The Hedgehog 2** (músicas $81–$9F, SMPS no Z80).
+- **Análise automática de ROM (experimental)**: ao abrir uma ROM de Mega Drive sem perfil, o programa oferece
+  analisá-la. Ele liga o jogo no emulador até a música da abertura, descobre como o jogo pede música ao driver de
+  som e testa todos os números, criando um perfil para você conferir pelas prévias. Funciona com jogos cujo som
+  roda no Z80 (ex.: Sonic 2, Castlevania: Bloodlines, Aladdin; Thunder Force III só as músicas do primeiro banco).
+  Alguns números podem ser variações ou ruído.
+- **Bateria pelo Z80 no XGM** (Sonic 2 e outros jogos em que o Z80 escreve o DAC byte a byte): as batidas são
+  separadas e agrupadas pelo começo da amostra, com uma taxa só por amostra. Na música $82 do Sonic 2: 5 amostras
+  em vez de 63, sem nenhuma batida de fora.
+- **Emulador do Mega Drive mais fiel**: o Z80 anda até o instante exato em que o 68000 pede ou devolve o
+  barramento (o Sonic 1 travava na tela da SEGA), o bit do barramento lido em $A11100 diz se o Z80 está parado
+  (o Gunstar Heroes travava), a região do console segue o cabeçalho da ROM (o Sonic Spinball japonês recusava o
+  console de exportação) e o controle 1 existe (para "apertar Start"). Os 13 jogos testados tocam música.
+- Saem XGM, VGM, .fur e prévia de cada música, como nas outras placas.
+- ROM de Mega Drive sem perfil: o programa avisa o nome e o código do jogo (cada jogo precisa dos endereços
+  do driver de som).
+
 ## [0.11.4] — 2026-11-22
 
 ### Novidades

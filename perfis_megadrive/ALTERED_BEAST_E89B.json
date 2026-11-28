@@ -1,0 +1,36 @@
+{
+ "title": "Altered Beast",
+ "short": "Altered_Beast",
+ "board": "Mega Drive, driver no Z80 (perfil criado pela análise)",
+ "author": "",
+ "serial": "GM 0005400",
+ "checksum": 59547,
+ "driver": "boot",
+ "sha1": "38945360d824d2fb9535b4fd7f25b9aa9b32f019",
+ "pad": true,
+ "names": {},
+ "analyzed": "2026-11-26 22:17",
+ "cpu": "z80",
+ "boot_frame": 38,
+ "field": [
+  7428,
+  2
+ ],
+ "songs": [
+  129,
+  130,
+  131,
+  132,
+  134,
+  135,
+  136,
+  137,
+  139,
+  140,
+  141,
+  142,
+  144
+ ],
+ "silent": 128,
+ "opening": 135
+}

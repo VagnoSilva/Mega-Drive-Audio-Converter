@@ -7,7 +7,10 @@ reports/
 build/
 dist/
 *.spec
-# biblioteca Linux gerada na hora; as DLLs do Windows (mdchips.dll e nuked_opn2.dll)
+# biblioteca Linux gerada na hora; as DLLs do Windows (mdchips.dll, nuked_opn2.dll e md68k.dll)
 # fazem parte do projeto e DEVEM ir para o repositório
 mdconv/chips/native/*.so
 mdconv/chips/native/nuked_opn2/*.so
+mdconv/chips/native/md68k/*.so
+.venv-build/
+tools/appimagetool-x86_64.AppImage

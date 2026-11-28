@@ -1,0 +1,10 @@
+# Finais de linha fixos: scripts de Linux com LF (com CRLF o sh do Linux quebra),
+# scripts do Windows com CRLF (com LF o cmd às vezes erra os "goto").
+*.sh        text eol=lf
+PKGBUILD    text eol=lf
+*.desktop   text eol=lf
+*.bat       text eol=crlf
+# binários: nunca converter
+*.dll       binary
+*.png       binary
+*.pdf       binary

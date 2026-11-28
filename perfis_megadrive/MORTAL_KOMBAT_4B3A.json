@@ -1,0 +1,40 @@
+{
+ "title": "Mortal Kombat",
+ "short": "MORTAL_KOMBAT",
+ "board": "Mega Drive, sequência no 68000 + Z80 (perfil da análise, revisado)",
+ "author": "",
+ "serial": "GM T-81186",
+ "checksum": 19258,
+ "driver": "boot",
+ "sha1": "c098bf38ddd755ab7caa4612d025be2039009eb2",
+ "pad": true,
+ "names": {},
+ "analyzed": "2026-11-26 02:05",
+ "cpu": "68k",
+ "update": 2076560,
+ "boot_frame": 177,
+ "field": [
+  16775749,
+  0
+ ],
+ "songs": [
+  3,
+  11,
+  12,
+  16,
+  31,
+  49,
+  63,
+  64,
+  80,
+  81,
+  83,
+  84,
+  86,
+  91,
+  92,
+  104
+ ],
+ "silent": 1,
+ "opening": 7
+}

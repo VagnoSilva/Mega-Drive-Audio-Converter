@@ -1,0 +1,60 @@
+# Pacote do Mega Drive Audio Converter para Arch Linux (roda do código-fonte, com as
+# bibliotecas Python do próprio Arch).
+#
+# Uso: copie a pasta do projeto inteira para o Arch, entre em packaging/arch e rode
+#   makepkg -si
+# Depois abra pelo menu ("Mega Drive Audio Converter") ou pelo terminal:
+#   megadrive-audio-converter
+pkgname=megadrive-audio-converter
+pkgver=0.12.0
+pkgrel=1
+pkgdesc="Converte e extrai músicas para o Mega Drive (YM2612/PSG, XGM/VGM/Furnace)"
+arch=('x86_64')
+license=('GPL-3.0-or-later')
+depends=('python' 'python-numpy' 'python-scipy' 'pyside6')
+makedepends=('gcc')
+checkdepends=('python-pytest')
+options=('!debug' '!strip')
+
+_root="$startdir/../.."
+
+build() {
+  rm -rf "$srcdir/app"
+  mkdir -p "$srcdir/app"
+  cp -r "$_root/mdconv" "$_root/biblioteca_patches" "$_root/perfis_megadrive" "$_root/run_gui.py" "$_root/tests" "$_root/pyproject.toml" "$srcdir/app/"
+  cd "$srcdir/app"
+  find . -name '__pycache__' -prune -exec rm -rf {} +
+  find mdconv/chips/native -name '*.dll' -delete
+  # compila os três emuladores em C (.so)
+  python -c "import mdconv.chips.emulator as e, mdconv.chips.nuked as n, mdconv.chips.md68k as m; e._load(); n._load(); m._load()"
+}
+
+check() {
+  cd "$srcdir/app"
+  python -m pytest -q -m "not slow" tests/unit
+}
+
+package() {
+  local dest="$pkgdir/usr/share/$pkgname"
+  install -d "$dest"
+  cd "$srcdir/app"
+  cp -r mdconv biblioteca_patches perfis_megadrive run_gui.py "$dest/"
+  find "$dest" -name '__pycache__' -prune -exec rm -rf {} +
+  # as .so ficam mais novas que os fontes: o programa nunca tenta recompilar em /usr
+  find "$dest/mdconv/chips/native" -name '*.so' -exec touch {} +
+  python -m compileall -q "$dest/mdconv"
+
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/$pkgname" <<'SH'
+#!/bin/sh
+exec python /usr/share/megadrive-audio-converter/run_gui.py "$@"
+SH
+  install -Dm644 "$_root/packaging/linux/megadrive-audio-converter.desktop" \
+    "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 "$_root/packaging/linux/megadrive-audio-converter.png" \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+  for f in Manual_Mega_Drive_Audio_Converter.pdf Manual_Mega_Drive_Audio_Converter_EN.pdf; do
+    [ -f "$_root/$f" ] && install -Dm644 "$_root/$f" "$pkgdir/usr/share/doc/$pkgname/$f"
+  done
+  [ -f "$_root/LICENSE" ] && install -Dm644 "$_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  true
+}

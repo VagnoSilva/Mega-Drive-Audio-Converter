@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QCheckBox, QInputDialog, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QInputDialog, QLineEdit, QMessageBox, QWidget
 
 from mdconv.i18n import tr
 
@@ -53,3 +53,47 @@ def ask_out_dir(parent, qsettings, dst: str, title: str):
         QMessageBox.warning(parent, title, tr("Não consegui criar a pasta:\n{0}").format(exc))
         return None
     return str(p), name, per_song
+
+
+class FormatChecks(QWidget):
+    """Caixas "XGM / VGM / Furnace (.fur) / Prévia (.wav)": quais arquivos cada música gera. A escolha
+    fica salva e é a mesma na Extração e na Música VGM."""
+
+    KEY = "out/formats"
+    LABELS = (("xgm", "XGM"), ("vgm", "VGM"), ("fur", "Furnace (.fur)"), ("wav", "Prévia (.wav)"))
+    TIPS = {"xgm": "Para o SGDK / jogo de Mega Drive.", "vgm": "Para tocadores de VGM e para estudar o som.",
+            "fur": "Para editar no Furnace Tracker.", "wav": "Para ouvir o resultado no computador."}
+
+    def __init__(self, qsettings, parent=None):
+        super().__init__(parent)
+        self.qs = qsettings
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        raw = self.qs.value(self.KEY, None)
+        on = {"xgm", "vgm", "fur", "wav"} if raw in (None, "") else set(str(raw).split(","))
+        self.cks = {}
+        for k, label in self.LABELS:
+            ck = QCheckBox(tr(label))
+            ck.setToolTip(tr(self.TIPS[k]))
+            ck.setChecked(k in on)
+            ck.toggled.connect(self._save)
+            h.addWidget(ck)
+            self.cks[k] = ck
+        h.addStretch(1)
+
+    def formats(self) -> set:
+        return {k for k, ck in self.cks.items() if ck.isChecked()}
+
+    def _save(self):
+        self.qs.setValue(self.KEY, ",".join(sorted(self.formats())))
+
+    def apply(self, parent, title) -> bool:
+        """Passa a escolha para o conversor; avisa (e devolve False) se nada estiver marcado."""
+        f = self.formats()
+        if not f:
+            QMessageBox.information(parent, title, tr("Marque ao menos um tipo de arquivo para gerar "
+                                                      "(XGM, VGM, Furnace ou Prévia)."))
+            return False
+        from mdconv.vgmconv import set_output_formats
+        set_output_formats(f)
+        return True

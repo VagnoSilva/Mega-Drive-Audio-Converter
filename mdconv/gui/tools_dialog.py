@@ -17,9 +17,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton,
-    QDoubleSpinBox, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from mdconv.ay.convert import AUTO, CH_NAMES, check_routing, dest_label
@@ -119,13 +119,16 @@ class ToolsDialog(QDialog):
         self.main = main
         self.qsettings = main.qsettings
         self.setWindowTitle(tr("Ferramentas — conversores e efeitos"))
-        self.resize(760, 640)
+        self.setSizeGripEnabled(True)
         v = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_vgm(), tr("Música VGM (AY / YM2203 / OPL / Mega Drive)"))
-        self.tabs.addTab(self._build_chip_sfx(), tr("Efeitos de chip (AY)"))
-        self.tabs.addTab(self._build_wav(), tr("Efeitos e vozes (WAV)"))
-        self.tabs.addTab(self._build_tfi(), tr("Banco de patches .tfi"))
+        self.tabs.addTab(self._scrolling(self._build_vgm()), tr("Música VGM (AY / YM2203 / OPL / Mega Drive)"))
+        self.tabs.addTab(self._scrolling(self._build_chip_sfx()), tr("Efeitos de chip (AY)"))
+        self.tabs.addTab(self._scrolling(self._build_wav()), tr("Efeitos e vozes (WAV)"))
+        self.tabs.addTab(self._scrolling(self._build_tfi()), tr("Banco de patches .tfi"))
+        # cabe na tela (o conteúdo das abas rola; o botão de converter fica sempre visível embaixo)
+        scr = (self.screen() or main.screen()).availableGeometry()
+        self.resize(min(820, int(scr.width() * 0.9)), min(720, int(scr.height() * 0.85)))
         self.tabs.setCurrentIndex(int(self.qsettings.value("tools/tab", 0) or 0))
         self.tabs.currentChanged.connect(lambda i: self.qsettings.setValue("tools/tab", i))
         v.addWidget(self.tabs, 1)
@@ -137,6 +140,33 @@ class ToolsDialog(QDialog):
         v.addWidget(bb)
 
     # ------------------------------------------------------------- utilidades
+    @staticmethod
+    def _scrolling(page: QWidget) -> QWidget:
+        """A aba rola dentro da janela; o botão de ação (o último da aba) sai da rolagem e fica fixo
+        embaixo, sempre ao alcance mesmo em telas baixas."""
+        lay = page.layout()
+        btn = None
+        if lay is not None and lay.count():
+            it = lay.itemAt(lay.count() - 1)
+            if it is not None and isinstance(it.widget(), QPushButton):
+                btn = it.widget()
+                lay.removeWidget(btn)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.NoFrame)
+        sc.setWidget(page)
+        box = QWidget()
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(0, 0, 0, 0)
+        bv.addWidget(sc, 1)
+        if btn is not None:
+            h = QHBoxLayout()
+            h.addStretch(1)
+            btn.setMinimumWidth(140)
+            h.addWidget(btn)
+            bv.addLayout(h)
+        return box
+
     def _out_default(self) -> str:
         return self.main.ed_out.text() or str(Path.home() / "mdconv" / "saida")
 
@@ -182,6 +212,9 @@ class ToolsDialog(QDialog):
         f = QFormLayout()
         self.vgm_out = _DirRow(self, "tools/vgm_out", tr("Pasta onde gravar XGM, VGM e prévias"), self._out_default())
         f.addRow(tr("Pasta de saída:"), self.vgm_out)
+        from mdconv.gui.outdir import FormatChecks
+        self.vgm_fmt = FormatChecks(self.qsettings)
+        f.addRow(tr("Gerar:"), self.vgm_fmt)
         self.vgm_grid = QCheckBox(tr("Travar o andamento na grade de 60 Hz (muda o andamento em até 6%)"))
         self.vgm_grid.setToolTip(tr("Ajusta o andamento para o passo rítmico durar um número inteiro de quadros\n"
                                  "(ritmo sem oscilação no XGM). Desmarcado = andamento original."))
@@ -459,6 +492,8 @@ class ToolsDialog(QDialog):
     def run_vgm(self):
         files, dst = self.vgm_files.files(), self.vgm_out.path()
         if not self._need(files, dst):
+            return
+        if not self.vgm_fmt.apply(self, self.windowTitle()):
             return
         routing = self.routing()
         opl_routing = self.opl_routing()

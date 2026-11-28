@@ -1,0 +1,31 @@
+{
+ "title": "Thunder Force3",
+ "short": "THUNDER_FORCE3",
+ "board": "Mega Drive, driver no Z80 (perfil criado pela análise)",
+ "author": "",
+ "serial": "GM T-18033",
+ "checksum": 1656,
+ "driver": "boot",
+ "sha1": "9eadee76eb0509d5a0f16372fc9eac7a883e5f2d",
+ "boot_frame": 32,
+ "field": [
+  5,
+  0
+ ],
+ "songs": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9
+ ],
+ "silent": 10,
+ "opening": 3,
+ "names": {},
+ "analyzed": "2026-11-26 00:38"
+}

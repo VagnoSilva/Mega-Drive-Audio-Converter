@@ -1,0 +1,39 @@
+{
+ "title": "Streets of Rage",
+ "short": "Streets_of_Rage",
+ "board": "Mega Drive, driver no 68000 (perfil criado pela análise)",
+ "author": "",
+ "serial": "MK 0000101",
+ "checksum": 25488,
+ "driver": "boot",
+ "sha1": "731cdf182fe647e4977477ba4dd2e2b46b9b878a",
+ "pad": true,
+ "names": {},
+ "analyzed": "2026-11-26 23:08",
+ "cpu": "68k",
+ "update": 469268,
+ "boot_frame": 997,
+ "field": [
+  16773130,
+  0
+ ],
+ "songs": [
+  129,
+  130,
+  132,
+  133,
+  134,
+  135,
+  136,
+  137,
+  138,
+  139,
+  140,
+  141,
+  142,
+  144,
+  145
+ ],
+ "silent": 0,
+ "opening": 138
+}

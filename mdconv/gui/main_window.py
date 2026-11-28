@@ -129,7 +129,11 @@ class MainWindow(QMainWindow):
         v.addWidget(split, 1)
         self.main_tabs = QTabWidget()
         self.main_tabs.addTab(self.extract_tab, tr("Extração"))
+        from mdconv.gui.catalog_tab import CatalogTab
+        self.catalog_tab = CatalogTab(current_rom=lambda: self.extract_tab.ed_rom.text().strip() or None)
+        self.extract_tab.rom_event.connect(self.catalog_tab.rom_event)
         self.main_tabs.addTab(central, tr("Conversão"))
+        self.main_tabs.addTab(self.catalog_tab, tr("Catálogo Mega Drive"))
         self.main_tabs.setCurrentIndex(1)
         self.setCentralWidget(self.main_tabs)
         self._settings_to_widgets(ProjectSettings(

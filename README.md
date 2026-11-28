@@ -1,4 +1,4 @@
-# Mega Drive Audio Converter — versão 0.11.4
+# Mega Drive Audio Converter — versão 0.12.0
 
 *Read in English: [README.en.md](README.en.md)*
 
@@ -9,7 +9,10 @@ Language).
 A janela tem duas abas:
 - **Extração** — tira MIDI + SoundFont direto da ROM: arcades **Capcom CPS1** (.zip do MAME) e
   **Game Boy Advance** (.gba, motor de som da Nintendo). Moon Patrol, Kung-Fu Master, Lode Runner,
-  Ghosts 'n Goblins, Nemesis, KOF 94 a 98 e Garou (Neo Geo) saem direto para o Mega Drive (XGM/VGM e efeitos em código C). Na CPS1 os timbres FM originais (YM2151)
+  Ghosts 'n Goblins, Nemesis, KOF 94 a 98 e Garou (Neo Geo) saem direto para o Mega Drive (XGM/VGM e efeitos em código C).
+  Jogos do próprio **Mega Drive** (.md/.bin; com perfil: Street Fighter II' SCE, Thunder Force IV e Sonic 2) saem
+  com o driver de som do jogo rodando no 68000 ou no Z80 emulados; para os outros, a extração oferece uma
+  análise automática que monta o perfil. Na CPS1 os timbres FM originais (YM2151)
   já saem convertidos para YM2612 numa biblioteca de patches aprovados. O botão
   "Abrir na conversão" leva a música escolhida para a outra aba.
 - **Conversão** — o conversor de sempre. Também aceita MIDI + SF2 do GBA Mus Ripper.
@@ -33,6 +36,36 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 `python -m mdconv.cli --version`).
 
 ## Histórico de versões
+
+**0.12.0**
+- **Extração de jogos do Mega Drive** (`mdconv/megadrive.py`): o 68000 é emulado pelo **Musashi**
+  (`mdconv/chips/native/md68k/`, MIT) com um mapa de memória mínimo do console (`mdsnd.c`: ROM, RAM,
+  área do Z80, YM2612, PSG, BUSREQ/RESET e o status do VDP). As rotinas de som da ROM são chamadas como
+  o jogo faz (inicialização, "tocar música" com o número em D0, atualização a cada quadro de 59,92 Hz) e
+  tudo o que vai para o YM2612 e o PSG é gravado como está. O loop vem de um breakpoint no comando de
+  "goto" do driver. Cada jogo tem um perfil (`megadrive.PROFILES`); o primeiro é o **Street Fighter II'
+  Special Champion Edition** (40 entradas). O PCM do Z80 é reproduzido pelo perfil (`megadrive.Mix2`: 2
+  canais somados e divididos por 2, ~5,2 kHz): no XGM as amostras originais vão para os canais PCM 1–2;
+  no VGM, o DAC misturado como no console.
+- **Z80 em C** (`mdconv/chips/native/md68k/z80.c`): tradução do `mdconv.z80` com os T-states reais, conferida
+  instrução a instrução contra o Z80 em Python (código aleatório, com interrupções). Roda junto com o 68000
+  (relógio mestre: 7 ciclos por ciclo do 68000, 15 por ciclo do Z80), com BUSREQ/RESET, a janela de banco em
+  $8000, a interrupção do VBlank e os **timers A e B do YM2612** (o status lido em $4000 traz os flags).
+  Breakpoints no Z80 registram o IX (qual faixa voltou ao loop).
+- Perfis com o driver no Z80 (`driver="z80"`): segundo jogo, **Thunder Force IV** (48 músicas, driver da
+  Technosoft). O loop vem do breakpoint no fim da faixa e do ponteiro da lista de padrões (uma passada basta).
+- **Jogo inteiro no emulador** (`Machine.run_game`): do reset, com a interrupção do VBlank (nível 6, linha 224) e o
+  status/contador HV do VDP pelo relógio. Estado salvo (`save_state`/`load_state`) e troca de escritas do 68000
+  na RAM do Z80 (`set_zoverride`).
+- **Análise automática** (`mdconv/mdanalyze.py`, perguntada na aba Extração quando a ROM não tem perfil): liga o
+  jogo até a música da abertura, acha a escrita do 68000 na RAM do Z80 que escolhe a música e testa os 256
+  valores. Gera um perfil `driver="boot"` em `%APPDATA%/MegaDriveAudioConverter/perfis_megadrive/`. Na extração,
+  o jogo roda até o pedido, o número é trocado e o Z80 toca sozinho; o loop vem da repetição das notas. Sonic 2
+  já vem com o perfil assim (`sonic2`). Experimental: drivers com pedidos de vários bytes (MK II, Road Rash),
+  música em outro banco (Thunder Force III) e o GEMS (Aladdin) ainda dão resultados incompletos.
+- `mdvgm.convert`: um disparo de PCM pode trazer o próprio canal (4º campo).
+- `md68k.dll` gerada por `tools/build_dll.sh` (clang + lld, só importa malloc/free/memcpy/memset/sin/cos
+  do msvcrt.dll); no Linux a biblioteca é compilada na hora com gcc.
 
 **0.11.4**
 - **Neo Geo (YM2610) na aba Música VGM**: VGM/VGZ do vgmrips passam pela mesma conversão da extração
@@ -233,8 +266,7 @@ A versão fica em `mdconv/__init__.py` (mostrada no título da janela, em Ajuda 
 - pytest (para os testes)
 
 - scipy (reamostragem e otimização)
-- gcc (MinGW-w64 no Windows) para compilar o emulador do chip na primeira execução
-  (o executável da Fase 9 virá com a DLL pronta)
+- no Linux, gcc (os emuladores em C são compilados na primeira execução); no Windows as DLLs vão prontas
 
 Os leitores MIDI/SF2 e o emulador YM2612/SN76489 são próprios.
 
@@ -382,18 +414,27 @@ plano e podem ser canceladas.
 
 Toda a lógica da janela está em `mdconv/app/project.py` (testada sem Qt, `tests/unit/test_phase7.py`).
 
-## Executável para Windows
+## Perfis de jogos de Mega Drive
 
-Na pasta do projeto, com Python 3.10+ instalado:
+A pasta `perfis_megadrive/` do projeto guarda um `.json` por jogo (onde fica o driver de som e quais
+números são músicas) e vai junto com o conversor em todos os executáveis. Para contribuir com um
+jogo novo: rode a análise automática na aba Extração, confira as prévias e copie o `.json` gerado
+para essa pasta (veja `perfis_megadrive/LEIA-ME.md`). Perfis na sua pasta de usuário têm prioridade
+sobre os do projeto.
 
-```
-packaging\build_windows.bat
-```
+A aba **Catálogo Mega Drive** lista os jogos e deixa cada pessoa marcar se funcionou (verde),
+não funcionou (vermelho) ou ainda não foi testado (cinza), vincular a ROM aberta ao jogo certo e
+**exportar um CSV** com o resultado — é a planilha que diz quais jogos precisam de atenção.
 
-O script instala numpy, scipy, PySide6 e PyInstaller, roda os testes e gera
-`dist\MegaDriveAudioConverter\MegaDriveAudioConverter.exe`. O emulador nativo vai pronto
-em `mdconv/chips/native/mdchips.dll` (gerada por `tools/build_dll.sh`; não precisa de
-compilador no Windows).
+## Compilar (Windows e Linux)
+
+Passo a passo em [COMPILAR.md](COMPILAR.md). Resumo, na pasta do projeto:
+
+- **Windows:** `packaging\build_windows.bat` (só precisa do Python 3.12 de 64 bits; as DLLs dos
+  emuladores vão prontas).
+- **Linux:** `sh packaging/build_appimage.sh` (AppImage), `sh packaging/build_linux.sh` (pasta/.tar.gz)
+  ou, no Arch, `cd packaging/arch && makepkg -si`. Precisa de python e gcc.
+- **GitHub Actions:** gera os dois de uma vez.
 
 ## Emuladores usados na prévia
 
@@ -405,6 +446,9 @@ compilador no Windows).
 * **Busca de patches**: emulador próprio (`mdchips.c`), ~4× mais rápido, com o mesmo nível
   do Nuked (±0,3 dB na música inteira do song001).
 * **PSG e PCM**: emulador próprio e mixer que imita o do XGM.
+* **68000 (extração de jogos do Mega Drive): Musashi**, de Karl Stenerud, licença **MIT**
+  (`mdconv/chips/native/md68k/musashi/LICENSE.txt`), configurado só para o 68000 e compilado em
+  `md68k.dll` junto com `mdsnd.c` (mapa de memória do Mega Drive) e `z80.c` (Z80), ambos deste projeto.
 
 Os arquivos exportados (XGM/VGM) não dependem do emulador: são as mesmas escritas de
 registrador.
@@ -489,10 +533,10 @@ manda as peças metálicas do kit para o canal de ruído do PSG em vez do PCM:
 
 ## Publicar o executável no GitHub
 
-1. Gere com `packaging\build_windows.bat` (ou `... onefile`). No fim ele cria
-   `dist\MegaDriveAudioConverter-windows-x64.zip`.
+1. Gere com `packaging\build_windows.bat` (e, para Linux, `sh packaging/build_appimage.sh`). No fim
+   eles criam `dist\MegaDriveAudioConverter-windows-x64.zip` e o `.AppImage`.
 2. No GitHub: **Releases → Draft a new release**, escolha uma tag (ex.: `v0.1`) e
-   arraste esse **.zip** para "Attach binaries". Publique.
+   arraste o **.zip** (e o `.AppImage`, se tiver) para "Attach binaries". Publique.
 3. Quem baixar: extrai o zip e roda `MegaDriveAudioConverter.exe` **de dentro da pasta
    extraída** (ao lado da pasta `_internal`).
 

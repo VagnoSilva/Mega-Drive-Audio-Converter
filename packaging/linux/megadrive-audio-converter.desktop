@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Mega Drive Audio Converter
+Comment=Converte e extrai músicas para o Mega Drive (YM2612/PSG, XGM/VGM/Furnace)
+Exec=megadrive-audio-converter
+Icon=megadrive-audio-converter
+Terminal=false
+Categories=AudioVideo;Audio;Music;

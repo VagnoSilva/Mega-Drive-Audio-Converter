@@ -1,4 +1,5 @@
-"""Aba "Extração": tira MIDI + SoundFont de ROMs (Capcom CPS1 e Game Boy Advance).
+"""Aba "Extração": tira MIDI + SoundFont de ROMs (Capcom CPS1 e Game Boy Advance), e músicas prontas para o
+Mega Drive de placas emuladas e de jogos do próprio Mega Drive.
 
 Funciona sozinha, como o extrator independente. O botão "Abrir na conversão" leva a música
 escolhida (MIDI + SF2 + biblioteca, quando houver) para a aba "Conversão"."""
@@ -10,11 +11,12 @@ import os
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QRadioButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+    QMenu, QProgressBar, QPushButton, QRadioButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -50,8 +52,32 @@ class _Job(QRunnable):
             self.signals.done.emit(None)
 
 
+class _AnalyzeJob(QRunnable):
+    """Análise de compatibilidade de uma ROM de Mega Drive (mdconv.mdanalyze) em segundo plano."""
+
+    def __init__(self, rom):
+        super().__init__()
+        self.rom = rom
+        self.error = ""
+        self.signals = _Signals()
+
+    def run(self):
+        try:
+            from mdconv import mdanalyze
+            prof = mdanalyze.analyze(self.rom, log=lambda m: self.signals.log.emit(str(m)),
+                                     progress=lambda stage, a, b: self.signals.prog.emit(int(a), int(max(1, b))))
+            self.signals.done.emit(prof)
+        except Exception as exc:  # noqa: BLE001 — o motivo aparece no registro
+            self.error = str(exc)
+            self.signals.log.emit(tr("Análise sem resultado: ") + str(exc))
+            self.signals.done.emit(None)
+
+
 class ExtractTab(QWidget):
-    """``open_in_converter(midi, sf2, library_or_None)`` é chamado pelo botão de levar à conversão."""
+    """``open_in_converter(midi, sf2, library_or_None)`` é chamado pelo botão de levar à conversão.
+    ``rom_event`` avisa a aba Catálogo do que aconteceu com a ROM de Mega Drive aberta."""
+
+    rom_event = Signal(dict)
 
     def __init__(self, open_in_converter=None, parent=None):
         super().__init__(parent)
@@ -75,7 +101,7 @@ class ExtractTab(QWidget):
     def _build(self):
         v = QVBoxLayout(self)
 
-        g1 = QGroupBox(tr("1. ROM do jogo — .zip do MAME ou pasta (CPS1), .gba (Game Boy Advance)"))
+        g1 = QGroupBox(tr("1. ROM do jogo — .zip do MAME ou pasta (CPS1), .gba (Game Boy Advance), .md/.bin (Mega Drive)"))
         l1 = QVBoxLayout(g1)
         r1 = QHBoxLayout()
         self.ed_rom = QLineEdit()
@@ -136,6 +162,10 @@ class ExtractTab(QWidget):
         for c in (self.ck_midi, self.ck_sf2, self.ck_wav, self.ck_lib):
             c.setChecked(True)
             l3.addWidget(c)
+        from mdconv.gui.outdir import FormatChecks
+        l3.addWidget(QLabel(tr("Arquivos de cada música (Mega Drive, Neo Geo, arcades):")))
+        self.fmt = FormatChecks(self.qs)
+        l3.addWidget(self.fmt)
         l3.addWidget(QLabel(tr("Qualidade do SF2 (CPS1):")))
         self.rb_full = QRadioButton(tr("Completa (3 amostras/instr.)"))
         self.rb_quick = QRadioButton(tr("Rápida (1 amostra/instr.)"))
@@ -166,6 +196,11 @@ class ExtractTab(QWidget):
         self.bt_neo.clicked.connect(self.edit_neo_options)
         self.bt_neo.setEnabled(False)
         l3.addWidget(self.bt_neo)
+        self.bt_prof = QPushButton(tr("Perfis do Mega Drive…"))
+        self.bt_prof.setToolTip(tr("Salvar o perfil deste jogo para compartilhar, importar um perfil que "
+                                   "alguém mandou ou abrir a pasta dos seus perfis."))
+        self.bt_prof.clicked.connect(self.profiles_menu)
+        l3.addWidget(self.bt_prof)
         right.addWidget(g3)
 
         g4 = QGroupBox(tr("4. Pasta de saída"))
@@ -241,7 +276,7 @@ class ExtractTab(QWidget):
     def pick_file(self):
         p, _ = QFileDialog.getOpenFileName(
             self, tr("Escolha a ROM"), self.ed_rom.text() or str(Path.home()),
-            tr("ROMs (*.zip *.gba *.agb);;Romset do MAME (CPS1) (*.zip);;Game Boy Advance (*.gba *.agb);;Todos (*.*)"))
+            tr("ROMs (*.zip *.gba *.agb *.md *.bin *.gen);;Romset do MAME (CPS1) (*.zip);;Game Boy Advance (*.gba *.agb);;Mega Drive (*.md *.bin *.gen);;Todos (*.*)"))
         if p:
             self._set_rom(p)
 
@@ -271,15 +306,28 @@ class ExtractTab(QWidget):
     def load(self):
         rom = self.ed_rom.text().strip()
         if not rom:
-            QMessageBox.information(self, tr("Extração"), tr("Escolha primeiro a ROM (.zip, .gba ou pasta)."))
+            QMessageBox.information(self, tr("Extração"), tr("Escolha primeiro a ROM (.zip, .gba, .md ou pasta)."))
             return
         try:
             self.game = extract.open_rom(rom, self.cb_game.currentText().strip() or None)
         except Exception as e:  # noqa: BLE001
             self.game = None
+            if extract.is_megadrive(rom):
+                self.rom_event.emit(dict(path=rom, event="sem_perfil" if "sem perfil" in str(e) else "analise_falhou",
+                                         message=str(e)))
+            if "sem perfil" in str(e) and self.job is None:
+                r = QMessageBox.question(
+                    self, tr("Jogo de Mega Drive sem perfil"),
+                    str(e) + "\n\n" + tr("Quer que o programa analise a ROM e tente montar o perfil sozinho? "
+                                          "Leva de 1 a 3 minutos; confira as prévias depois."))
+                if r == QMessageBox.Yes:
+                    self.analyze_rom(rom)
+                return
             QMessageBox.critical(self, tr("Erro ao carregar"), str(e))
             return
         self.qs.setValue("extract/rom", rom)
+        if extract.is_megadrive(rom):
+            self.rom_event.emit(dict(path=rom, event="perfil", message=""))
         plat = extract.platform(self.game)
         gba = plat != "CPS1"
         mp = plat == "Direto"
@@ -316,6 +364,8 @@ class ExtractTab(QWidget):
         if (self.ck_midi.isChecked() or mp) and not sel:
             QMessageBox.information(self, tr("Extração"), tr("Selecione ao menos uma música."))
             return
+        if mp and not self.fmt.apply(self, tr("Extração")):
+            return
         out = self.ed_out.text().strip() or str(Path.home() / "Desktop" / "Audio_extraido")
         self.qs.setValue("extract/out", out)
         from mdconv.gui.outdir import ask_out_dir
@@ -341,6 +391,86 @@ class ExtractTab(QWidget):
         self.job.signals.prog.connect(lambda a, b: (self.prog.setMaximum(b), self.prog.setValue(a)))
         self.job.signals.done.connect(self._done)
         self.pool.start(self.job)
+
+    # ------------------------------------------------------------- análise de ROM de Mega Drive
+    def analyze_rom(self, rom: str):
+        self.log.clear()
+        self.prog.setValue(0)
+        self.bt_go.setEnabled(False)
+        self.job = _AnalyzeJob(rom)
+        self.job.signals.log.connect(self.log.appendPlainText)
+        self.job.signals.prog.connect(lambda a, b: (self.prog.setMaximum(b), self.prog.setValue(a)))
+        self.job.signals.done.connect(self._analyzed)
+        self.pool.start(self.job)
+
+    def _analyzed(self, prof):
+        job, self.job = self.job, None
+        self.bt_go.setEnabled(True)
+        rom = getattr(job, "rom", "")
+        if rom:
+            self.rom_event.emit(dict(path=rom, event="analise_ok" if prof else "analise_falhou",
+                                     message="" if prof else getattr(job, "error", "")))
+        if prof:
+            self.log.appendPlainText(tr("Perfil criado: {0} música(s). Carregando o jogo…").format(len(prof["songs"])))
+            self.log.appendPlainText(tr("Ouça as prévias; se ficou bom, compartilhe pelo botão "
+                                        "\"Perfis do Mega Drive…\" → Salvar o perfil deste jogo."))
+            self.load()
+
+    # ------------------------------------------------------------- perfis do Mega Drive
+    def _md_profile(self):
+        """Perfil (.json) do jogo de Mega Drive carregado, ou None (sem jogo ou perfil que vem no código)."""
+        p = getattr(getattr(self.game, "board", None), "p", None)
+        return p if p and "_file" in p else None
+
+    def profiles_menu(self):
+        from mdconv import mdanalyze
+        m = QMenu(self)
+        prof = self._md_profile()
+        a_save = m.addAction(tr("Salvar o perfil deste jogo para compartilhar…"))
+        a_save.setEnabled(prof is not None)
+        a_proj = None
+        if mdanalyze.project_dir_writable():
+            a_proj = m.addAction(tr("Colocar o perfil deste jogo na pasta do projeto"))
+            a_proj.setEnabled(prof is not None)
+        a_all = m.addAction(tr("Exportar todos os meus perfis…"))
+        a_imp = m.addAction(tr("Importar perfil que recebi…"))
+        m.addSeparator()
+        a_dir = m.addAction(tr("Abrir a pasta dos meus perfis"))
+        a = m.exec(self.bt_prof.mapToGlobal(self.bt_prof.rect().bottomLeft()))
+        try:
+            if a is None:
+                return
+            if a == a_save:
+                start = os.path.join(str(Path.home() / "Desktop") if (Path.home() / "Desktop").is_dir()
+                                     else str(Path.home()), mdanalyze.profile_filename(prof))
+                f, _ = QFileDialog.getSaveFileName(self, tr("Salvar perfil"), start, tr("Perfil (*.json)"))
+                if f:
+                    out = mdanalyze.export_profile(prof, f)
+                    QMessageBox.information(self, tr("Perfil salvo"), tr(
+                        "Perfil salvo em:\n{0}\n\nMande esse arquivo para quem mantém o conversor (ou para "
+                        "um amigo, que usa \"Importar perfil que recebi…\").").format(out))
+            elif a_proj is not None and a == a_proj:
+                out = mdanalyze.export_profile(prof, mdanalyze.project_profiles_dir())
+                self.log.appendPlainText(tr("Perfil copiado para a pasta do projeto: ") + str(out))
+            elif a == a_all:
+                d = QFileDialog.getExistingDirectory(self, tr("Exportar todos os meus perfis para…"),
+                                                     str(Path.home()))
+                if d:
+                    out = mdanalyze.export_all_profiles(os.path.join(d, "perfis_megadrive"))
+                    QMessageBox.information(self, tr("Perfis exportados"), tr(
+                        "{0} perfil(is) copiado(s) para:\n{1}\n\nCompacte essa pasta e mande para quem mantém "
+                        "o conversor.").format(len(out), os.path.join(d, "perfis_megadrive")))
+            elif a == a_imp:
+                files, _ = QFileDialog.getOpenFileNames(self, tr("Importar perfil"), str(Path.home()),
+                                                        tr("Perfil (*.json)"))
+                done = [mdanalyze.import_profile(f) for f in files]
+                if done:
+                    QMessageBox.information(self, tr("Perfil importado"), tr(
+                        "{0} perfil(is) importado(s). Abra a ROM do jogo na aba Extração.").format(len(done)))
+            elif a == a_dir:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(mdanalyze.profiles_dir())))
+        except (OSError, ValueError) as e:
+            QMessageBox.critical(self, tr("Perfis do Mega Drive"), str(e))
 
     # ------------------------------------------------------------- canais dos efeitos
     def _sfx_key(self) -> str:

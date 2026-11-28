@@ -196,8 +196,25 @@ def write_exact_vgm(events, total, loop, path, title="", game="", author="", not
     Path(path).write_bytes(bytes(header + body + gd3))
 
 
+ALL_FORMATS = ("xgm", "vgm", "fur", "wav")
+_FORMATS = set(ALL_FORMATS)
+
+
+def set_output_formats(formats) -> None:
+    """Quais arquivos cada música gera (o usuário escolhe nas caixas "XGM / VGM / Furnace / Prévia"):
+    vale para todas as conversões e extrações seguintes."""
+    global _FORMATS
+    _FORMATS = {f for f in formats if f in ALL_FORMATS}
+
+
+def output_formats() -> set:
+    return set(_FORMATS)
+
+
 def write_outputs(stream, report, gd3, path, out_dir, name, xgm, vgm, wav, log, chip, exact=None, fur=True,
                   style=None, pcm_atten_db=None):
+    xgm, vgm, fur, wav = (xgm and "xgm" in _FORMATS, vgm and "vgm" in _FORMATS, fur and "fur" in _FORMATS,
+                          wav and "wav" in _FORMATS)
     from mdconv.export.vgm import write_vgm
     from mdconv.export.xgm import write_xgm
     out = Path(out_dir) if out_dir else Path(path).parent

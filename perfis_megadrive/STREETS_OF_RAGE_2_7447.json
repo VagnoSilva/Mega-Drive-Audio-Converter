@@ -1,0 +1,58 @@
+{
+ "title": "Streets of Rage 2",
+ "short": "Streets_of_Rage_2",
+ "board": "Mega Drive, driver no 68000 (perfil criado pela análise)",
+ "author": "",
+ "serial": "GM MK-1054",
+ "checksum": 29767,
+ "driver": "boot",
+ "sha1": "8b656eec9692d88bbbb84787142aa732b44ce0be",
+ "pad": true,
+ "names": {},
+ "analyzed": "2026-11-26 22:55",
+ "cpu": "68k",
+ "update": 262144,
+ "updates": [
+  262144,
+  262148
+ ],
+ "request": {
+  "entry": 262152,
+  "d1": 0
+ },
+ "boot_frame": 475,
+ "field": [
+  0,
+  0
+ ],
+ "songs": [
+  256,
+  257,
+  258,
+  259,
+  260,
+  261,
+  262,
+  263,
+  264,
+  265,
+  266,
+  267,
+  269,
+  270,
+  271,
+  273,
+  274,
+  275,
+  276,
+  277,
+  278,
+  279,
+  280,
+  281,
+  282,
+  283
+ ],
+ "silent": 268,
+ "opening": 266
+}
